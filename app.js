@@ -44,6 +44,11 @@ const state = {
   logs: [],
   ledger: null,
   reassignDraft: null,
+  scheduleDraft: {
+    feeHead: "",
+    instalmentCount: 1,
+    dates: [""]
+  },
   selectedReceipt: null,
   message: "",
   error: "",
@@ -880,6 +885,9 @@ function renderSetup() {
   const feeHeadOptions = feeHeads.map(item => `<div class="pill">${item.headName}</div>`).join("");
   const partnerLines = partners.map(item => `${item["Partner Name"]},${item["Share Percentage"]}`).join("\n");
   const canSchedule = feeHeads.length > 0;
+  const scheduleDraft = state.scheduleDraft || { feeHead: "", instalmentCount: 1, dates: [""] };
+  const scheduleHead = scheduleDraft.feeHead || safe(feeHeads, "0.headName", "");
+  const instalmentCount = Math.max(1, Math.min(24, Number(scheduleDraft.instalmentCount || 1)));
   return `
     <div class="grid">
       <div class="panel stack">
@@ -906,14 +914,20 @@ function renderSetup() {
         ${canSchedule ? `
           <div class="form-grid">
             <label>Fee Head
-              <select id="setup-schedule-head">
-                ${feeHeads.map(item => `<option>${item.headName}</option>`).join("")}
+              <select id="setup-schedule-head" onchange="handleScheduleHeadChange()">
+                ${feeHeads.map(item => `<option value="${item.headName}" ${scheduleHead === item.headName ? "selected" : ""}>${item.headName}</option>`).join("")}
               </select>
             </label>
-            <label>Due Date<input id="setup-schedule-date" type="date" /></label>
-            <label>No. of Instalments<input id="setup-schedule-count" type="number" min="1" max="24" value="1" /></label>
+            <label>No. of Instalments<input id="setup-schedule-count" type="number" min="1" max="24" value="${instalmentCount}" onchange="handleScheduleCountChange()" /></label>
           </div>
-          <div class="muted">If you enter more than 1 instalment, monthly due dates will be created starting from the selected date.</div>
+          <div class="stack">
+            ${Array.from({ length: instalmentCount }, (_, index) => `
+              <label>Instalment ${index + 1} Due Date
+                <input class="setup-schedule-date" data-index="${index}" type="date" value="${scheduleDraft.dates[index] || ""}" />
+              </label>
+            `).join("")}
+          </div>
+          <div class="muted">Add the exact due date for each instalment of this fee head.</div>
           <button class="primary" onclick="handleSaveSchedule()">Add Schedule</button>
         ` : `<div class="muted">Create at least one fee head first, then add schedule dates for it.</div>`}
       </div>
@@ -1347,15 +1361,45 @@ async function handleSaveFeeHead() {
   }
 }
 
+function handleScheduleHeadChange() {
+  state.scheduleDraft.feeHead = qs("#setup-schedule-head") ? qs("#setup-schedule-head").value : "";
+}
+
+function handleScheduleCountChange() {
+  const nextCount = Math.max(1, Math.min(24, Number(qs("#setup-schedule-count") ? qs("#setup-schedule-count").value : 1) || 1));
+  const existingDates = Array.isArray(state.scheduleDraft.dates) ? state.scheduleDraft.dates.slice(0, nextCount) : [];
+  while (existingDates.length < nextCount) {
+    existingDates.push("");
+  }
+  state.scheduleDraft = {
+    feeHead: qs("#setup-schedule-head") ? qs("#setup-schedule-head").value : state.scheduleDraft.feeHead,
+    instalmentCount: nextCount,
+    dates: existingDates
+  };
+  render();
+}
+
 async function handleSaveSchedule() {
   try {
+    const feeHead = qs("#setup-schedule-head").value;
+    const dates = Array.from(document.querySelectorAll(".setup-schedule-date"))
+      .map(input => input.value)
+      .filter(Boolean);
+    if (!dates.length) {
+      throw new Error("Add at least one due date");
+    }
     await api("saveSchedules", {
-      schedules: [{
-        feeHead: qs("#setup-schedule-head").value,
-        dueDate: qs("#setup-schedule-date").value,
-        instalmentCount: Number(qs("#setup-schedule-count").value || 1)
-      }]
+      schedules: dates.map(dueDate => ({
+        feeHead,
+        dueDate,
+        instalmentCount: 1
+      }))
     });
+    state.scheduleDraft = {
+      feeHead,
+      instalmentCount: 1,
+      dates: [""]
+    };
     setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dueReport", "dashboard"]);
@@ -1517,5 +1561,6 @@ function exportCurrentView() {
 
 render();
 init();
+
 
 
