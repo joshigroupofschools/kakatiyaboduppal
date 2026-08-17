@@ -1,8 +1,18 @@
 const DEFAULT_API_URL = "https://script.google.com/macros/s/AKfycbyZ8RXjDl4IPoIYlqG-KwRp-wgtiDLDO3aQwG5qhI0PsAQttq9jQpnB_NYADgSe87l5/exec";
+const DEFAULT_BOOTSTRAP = {
+  schoolName: "School Fee Management",
+  academicYear: "",
+  role: "",
+  userId: "",
+  classes: [],
+  schedules: [],
+  categories: [],
+  partners: []
+};
 
 const state = {
   token: localStorage.getItem("feeToken") || "",
-  bootstrap: null,
+  bootstrap: JSON.parse(localStorage.getItem("feeBootstrap") || "null"),
   view: "dashboard",
   stale: {
     dashboard: true,
@@ -130,16 +140,37 @@ function setMessage(message, isError = false) {
   render();
 }
 
+function setBootstrap(patch) {
+  state.bootstrap = Object.assign({}, DEFAULT_BOOTSTRAP, state.bootstrap || {}, patch || {});
+  localStorage.setItem("feeBootstrap", JSON.stringify(state.bootstrap));
+}
+
+async function ensureBootstrapData() {
+  const needsFullBootstrap =
+    !state.bootstrap ||
+    !Array.isArray(state.bootstrap.classes) ||
+    !Array.isArray(state.bootstrap.categories) ||
+    !Array.isArray(state.bootstrap.partners) ||
+    !Array.isArray(state.bootstrap.schedules);
+  if (needsFullBootstrap || state.stale.setup) {
+    setBootstrap(await api("getBootstrap"));
+    markFresh(["setup"]);
+  }
+}
+
 async function init() {
   if (!state.token) {
     render();
     return;
   }
   try {
-    state.bootstrap = await api("getBootstrap");
+    if (!state.bootstrap) {
+      setBootstrap(DEFAULT_BOOTSTRAP);
+    }
     await loadViewData(state.view);
   } catch (error) {
     localStorage.removeItem("feeToken");
+    localStorage.removeItem("feeBootstrap");
     state.token = "";
     state.bootstrap = null;
     setMessage(error.message, true);
@@ -164,10 +195,12 @@ async function loadViewData(view) {
       markFresh(["dashboard"]);
     }
     if (view === "students" && (state.stale.students || !state.students.length)) {
+      await ensureBootstrapData();
       state.students = await api("listStudents");
       markFresh(["students"]);
     }
     if (view === "collect" && (state.stale.students || !state.students.length)) {
+      await ensureBootstrapData();
       state.students = await api("listStudents");
       markFresh(["students"]);
     }
@@ -176,10 +209,12 @@ async function loadViewData(view) {
       markFresh(["receipts"]);
     }
     if (view === "expenses" && (state.stale.expenses || !state.expenses.length)) {
+      await ensureBootstrapData();
       state.expenses = await api("listExpenses");
       markFresh(["expenses"]);
     }
     if (view === "handover" && (state.stale.receipts || !state.receipts.length)) {
+      await ensureBootstrapData();
       state.receipts = await api("listReceipts");
       markFresh(["receipts"]);
     }
@@ -204,8 +239,7 @@ async function loadViewData(view) {
       markFresh(["logs"]);
     }
     if (view === "setup" && (state.stale.setup || !state.bootstrap)) {
-      state.bootstrap = await api("getBootstrap");
-      markFresh(["setup"]);
+      await ensureBootstrapData();
     }
   } finally {
     if (isSlowView) {
@@ -896,7 +930,12 @@ async function handleLogin() {
     state.token = result.data.token;
     localStorage.setItem("feeToken", state.token);
     markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs", "setup"]);
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap({
+      schoolName: result.data.schoolName,
+      academicYear: result.data.academicYear,
+      role: result.data.role,
+      userId: result.data.userId
+    });
     await loadViewData("dashboard");
     setMessage("Login successful");
   } catch (error) {
@@ -911,6 +950,7 @@ async function handleLogout() {
     console.error(error);
   }
   localStorage.removeItem("feeToken");
+  localStorage.removeItem("feeBootstrap");
   state.token = "";
   state.bootstrap = null;
   render();
@@ -1159,7 +1199,7 @@ async function handleSaveSettings() {
   try {
     await api("saveBasicSettings", { schoolName: qs("#setup-school-name").value.trim() });
     await api("setAcademicYear", { academicYear: qs("#setup-year").value.trim() });
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs"]);
     setMessage("Settings updated");
@@ -1176,7 +1216,7 @@ async function handleSaveClass() {
         actualSchoolFee: Number(qs("#setup-class-fee").value)
       }]
     });
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dashboard"]);
     setMessage("Class added");
@@ -1193,7 +1233,7 @@ async function handleSaveSchedule() {
         dueDate: qs("#setup-schedule-date").value
       }]
     });
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dueReport", "dashboard"]);
     setMessage("Schedule added");
@@ -1207,7 +1247,7 @@ async function handleSaveCategory() {
     await api("saveExpenseCategories", {
       categories: [qs("#setup-category-name").value.trim()]
     });
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     setMessage("Category added");
   } catch (error) {
@@ -1231,7 +1271,7 @@ async function handleSavePartner() {
     await api("savePartners", {
       partners
     });
-    state.bootstrap = await api("getBootstrap");
+    setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["partners", "finances", "logs"]);
     setMessage("Partner set saved");
