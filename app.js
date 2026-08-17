@@ -90,7 +90,7 @@ async function api(action, payload = {}, token = state.token) {
   }
   const response = await fetch(apiUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, payload, token })
   });
   const data = await response.json();
@@ -847,7 +847,7 @@ async function handleLogin() {
     localStorage.setItem("feeApiUrl", apiUrl);
     const result = await fetch(apiUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
       body: JSON.stringify({
         action: "login",
         payload: {
@@ -1292,3 +1292,4 @@ function exportCurrentView() {
 
 render();
 init();
+
