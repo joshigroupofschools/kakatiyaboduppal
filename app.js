@@ -1480,14 +1480,18 @@ async function handleSaveClass() {
 }
 
 async function handleDeleteClass(classId) {
-  const reason = prompt("Reason for deleting this class");
-  if (!reason) return;
+  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  if (!action) return;
   try {
-    await api("archiveClass", { classId, reason: reason.trim() });
+    if (action.trim() === "DELETE") {
+      await api("deleteClass", { classId });
+    } else {
+      await api("archiveClass", { classId, reason: action.trim() });
+    }
     setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dashboard"]);
-    setMessage("Class deleted");
+    setMessage(action.trim() === "DELETE" ? "Class permanently deleted" : "Class archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1527,14 +1531,18 @@ async function handleEditFeeHead(headId, currentName) {
 }
 
 async function handleDeleteFeeHead(headId) {
-  const reason = prompt("Reason for deleting this fee head");
-  if (!reason) return;
+  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  if (!action) return;
   try {
-    await api("archiveFeeHead", { headId, reason: reason.trim() });
+    if (action.trim() === "DELETE") {
+      await api("deleteFeeHead", { headId });
+    } else {
+      await api("archiveFeeHead", { headId, reason: action.trim() });
+    }
     setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dueReport", "dashboard", "analytics"]);
-    setMessage("Fee head deleted");
+    setMessage(action.trim() === "DELETE" ? "Fee head permanently deleted" : "Fee head archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1627,14 +1635,18 @@ async function handleEditSchedule(scheduleId, currentHead, currentDate) {
 }
 
 async function handleDeleteSchedule(scheduleId) {
-  const reason = prompt("Reason for deleting this schedule");
-  if (!reason) return;
+  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  if (!action) return;
   try {
-    await api("archiveSchedule", { scheduleId, reason: reason.trim() });
+    if (action.trim() === "DELETE") {
+      await api("deleteSchedule", { scheduleId });
+    } else {
+      await api("archiveSchedule", { scheduleId, reason: action.trim() });
+    }
     setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
     markStale(["students", "dueReport", "dashboard"]);
-    setMessage("Schedule deleted");
+    setMessage(action.trim() === "DELETE" ? "Schedule permanently deleted" : "Schedule archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1654,13 +1666,17 @@ async function handleSaveCategory() {
 }
 
 async function handleDeleteCategory(categoryId) {
-  const reason = prompt("Reason for deleting this category");
-  if (!reason) return;
+  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  if (!action) return;
   try {
-    await api("archiveExpenseCategory", { categoryId, reason: reason.trim() });
+    if (action.trim() === "DELETE") {
+      await api("deleteExpenseCategory", { categoryId });
+    } else {
+      await api("archiveExpenseCategory", { categoryId, reason: action.trim() });
+    }
     setBootstrap(await api("getBootstrap"));
     markFresh(["setup"]);
-    setMessage("Category deleted");
+    setMessage(action.trim() === "DELETE" ? "Category permanently deleted" : "Category archived");
   } catch (error) {
     setMessage(error.message, true);
   }
