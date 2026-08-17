@@ -21,10 +21,15 @@ body {
   margin: 0;
   font-family: var(--font);
   color: var(--text);
+  line-height: 1.45;
   background:
     radial-gradient(circle at top left, rgba(13, 111, 102, 0.16), transparent 24%),
     radial-gradient(circle at 85% 15%, rgba(155, 93, 21, 0.14), transparent 22%),
     linear-gradient(180deg, #f8f1e4 0%, #efe7d7 100%);
+}
+
+#app {
+  min-height: 100vh;
 }
 
 .shell {
@@ -96,6 +101,7 @@ button.danger {
 
 .content {
   padding: 20px;
+  min-width: 0;
 }
 
 .toolbar {
@@ -104,6 +110,7 @@ button.danger {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
 
 .toolbar .actions {
@@ -124,11 +131,12 @@ button.danger {
 .grid {
   display: grid;
   gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
   gap: 12px;
 }
 
@@ -164,6 +172,7 @@ button.danger {
 
 table {
   width: 100%;
+  min-width: 720px;
   border-collapse: collapse;
   font-size: 0.95rem;
 }
@@ -186,6 +195,8 @@ th {
 .table-wrap {
   overflow: auto;
   max-height: 70vh;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 14px;
 }
 
 .form-grid {
@@ -209,6 +220,11 @@ textarea {
   padding: 10px 12px;
   font: inherit;
   background: #fff;
+}
+
+textarea {
+  min-height: 120px;
+  resize: vertical;
 }
 
 button.primary {
@@ -316,19 +332,152 @@ h3 {
   font-size: 0.9rem;
 }
 
+@media (max-width: 1280px) {
+  .cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 1024px) {
-  .cards,
-  .split,
   .shell,
+  .split,
   .form-grid {
     grid-template-columns: 1fr;
   }
 
   .sidebar {
-    padding-bottom: 8px;
+    padding: 18px 14px 12px;
   }
 
   .content {
     padding: 14px;
+  }
+
+  .menu {
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(150px, 1fr);
+    overflow-x: auto;
+    padding-bottom: 6px;
+    margin-top: 18px;
+  }
+
+  .menu button {
+    min-height: 44px;
+    white-space: nowrap;
+  }
+
+  .sidebar::after {
+    display: none;
+  }
+}
+
+@media (max-width: 768px) {
+  .brand {
+    font-size: 1.15rem;
+  }
+
+  .toolbar {
+    align-items: stretch;
+  }
+
+  .toolbar .actions {
+    width: 100%;
+  }
+
+  .toolbar .actions button {
+    flex: 1 1 140px;
+  }
+
+  .panel {
+    padding: 14px;
+    border-radius: 14px;
+  }
+
+  .cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .card .value {
+    font-size: 1.35rem;
+  }
+
+  table {
+    min-width: 640px;
+    font-size: 0.9rem;
+  }
+
+  th,
+  td {
+    padding: 9px 7px;
+  }
+
+  .inline-form {
+    display: grid;
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .inline-form input,
+  .inline-form select,
+  .inline-form button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  body {
+    font-size: 15px;
+  }
+
+  .login {
+    padding: 16px;
+  }
+
+  .content {
+    padding: 10px;
+  }
+
+  .cards,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar .actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar .actions button,
+  button.primary,
+  button.secondary,
+  button.danger {
+    width: 100%;
+  }
+
+  .actions-row {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .actions-row button {
+    width: 100%;
+  }
+
+  .menu {
+    grid-auto-columns: minmax(132px, 1fr);
+    gap: 6px;
+  }
+
+  table {
+    min-width: 560px;
+  }
+
+  .loading-time {
+    font-size: 1.7rem;
   }
 }

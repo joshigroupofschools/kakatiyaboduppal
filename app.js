@@ -4,6 +4,18 @@ const state = {
   token: localStorage.getItem("feeToken") || "",
   bootstrap: null,
   view: "dashboard",
+  stale: {
+    dashboard: true,
+    students: true,
+    receipts: true,
+    expenses: true,
+    dueReport: true,
+    analytics: true,
+    finances: true,
+    partners: true,
+    logs: true,
+    setup: true
+  },
   loading: {
     active: false,
     view: "",
@@ -83,6 +95,18 @@ function stopLoading() {
   state.loading.timerId = null;
 }
 
+function markStale(keys) {
+  keys.forEach(key => {
+    if (state.stale[key] !== undefined) state.stale[key] = true;
+  });
+}
+
+function markFresh(keys) {
+  keys.forEach(key => {
+    if (state.stale[key] !== undefined) state.stale[key] = false;
+  });
+}
+
 async function api(action, payload = {}, token = state.token) {
   const apiUrl = getApiUrl();
   if (!apiUrl) {
@@ -135,41 +159,53 @@ async function loadViewData(view) {
     render();
   }
   try {
-    if (view === "dashboard") {
+    if (view === "dashboard" && (state.stale.dashboard || !state.dashboard)) {
       state.dashboard = await api("getDashboard");
+      markFresh(["dashboard"]);
     }
-    if (view === "students") {
+    if (view === "students" && (state.stale.students || !state.students.length)) {
       state.students = await api("listStudents");
+      markFresh(["students"]);
     }
-    if (view === "collect") {
+    if (view === "collect" && (state.stale.students || !state.students.length)) {
       state.students = await api("listStudents");
+      markFresh(["students"]);
     }
-    if (view === "receipts") {
+    if (view === "receipts" && (state.stale.receipts || !state.receipts.length)) {
       state.receipts = await api("listReceipts");
+      markFresh(["receipts"]);
     }
-    if (view === "expenses") {
+    if (view === "expenses" && (state.stale.expenses || !state.expenses.length)) {
       state.expenses = await api("listExpenses");
+      markFresh(["expenses"]);
     }
-    if (view === "handover") {
+    if (view === "handover" && (state.stale.receipts || !state.receipts.length)) {
       state.receipts = await api("listReceipts");
+      markFresh(["receipts"]);
     }
-    if (view === "due-report") {
+    if (view === "due-report" && state.stale.dueReport) {
       state.dueReport = await api("getDueReport", { asOnDate: new Date().toISOString().slice(0, 10), activeOnly: true });
+      markFresh(["dueReport"]);
     }
-    if (view === "analytics") {
+    if (view === "analytics" && state.stale.analytics) {
       state.analytics = await api("getAnalytics", { asOfDate: new Date().toISOString().slice(0, 10) });
+      markFresh(["analytics"]);
     }
-    if (view === "finances") {
+    if (view === "finances" && state.stale.finances) {
       state.finances = await api("getFinances");
+      markFresh(["finances"]);
     }
-    if (view === "partners") {
+    if (view === "partners" && state.stale.partners) {
       state.partners = await api("getPartnerAccounts");
+      markFresh(["partners"]);
     }
-    if (view === "logs") {
+    if (view === "logs" && state.stale.logs) {
       state.logs = await api("listLogs");
+      markFresh(["logs"]);
     }
-    if (view === "setup") {
+    if (view === "setup" && (state.stale.setup || !state.bootstrap)) {
       state.bootstrap = await api("getBootstrap");
+      markFresh(["setup"]);
     }
   } finally {
     if (isSlowView) {
@@ -859,6 +895,7 @@ async function handleLogin() {
     if (!result.success) throw new Error(result.error);
     state.token = result.data.token;
     localStorage.setItem("feeToken", state.token);
+    markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs", "setup"]);
     state.bootstrap = await api("getBootstrap");
     await loadViewData("dashboard");
     setMessage("Login successful");
@@ -915,6 +952,8 @@ async function handleAddStudent() {
       joinedDate: qs("#student-joined").value
     });
     state.students = await api("listStudents");
+    markFresh(["students"]);
+    markStale(["dashboard", "dueReport", "analytics", "finances", "setup"]);
     setMessage("Student added");
   } catch (error) {
     setMessage(error.message, true);
@@ -940,6 +979,8 @@ async function handleToggleStudentStatus(studentId, currentStatus) {
       reason
     });
     state.students = await api("listStudents");
+    markFresh(["students"]);
+    markStale(["dashboard", "dueReport", "analytics", "finances"]);
     if (state.ledger && state.ledger.student["Student ID"] === studentId) {
       state.ledger = await api("getStudentLedger", { studentId });
     }
@@ -967,6 +1008,8 @@ async function handleReassignPrompt(studentId) {
       reason
     });
     state.students = await api("listStudents");
+    markFresh(["students"]);
+    markStale(["dashboard", "dueReport", "analytics", "finances"]);
     state.ledger = await api("getStudentLedger", { studentId });
     setMessage("Fee reassigned");
   } catch (error) {
@@ -987,6 +1030,8 @@ async function handleCollectFees() {
     const result = await api("collectFees", payload);
     state.receipts = await api("listReceipts");
     state.students = await api("listStudents");
+    markFresh(["receipts", "students"]);
+    markStale(["dashboard", "dueReport", "analytics", "finances", "partners", "logs"]);
     setMessage(`Receipt created: ${result.receiptNumber}`);
   } catch (error) {
     setMessage(error.message, true);
@@ -999,6 +1044,8 @@ async function handleCancelReceipt(receiptId) {
   try {
     await api("cancelReceipt", { receiptId, reason });
     state.receipts = await api("listReceipts");
+    markFresh(["receipts"]);
+    markStale(["dashboard", "students", "dueReport", "analytics", "finances", "partners", "logs"]);
     if (state.selectedReceipt && state.selectedReceipt.receipt["Receipt ID"] === receiptId) {
       state.selectedReceipt = await api("getReceipt", { receiptId });
     }
@@ -1066,6 +1113,8 @@ async function handleAddExpense() {
       remarks: qs("#expense-remarks").value.trim()
     });
     state.expenses = await api("listExpenses");
+    markFresh(["expenses"]);
+    markStale(["finances", "partners", "logs"]);
     setMessage("Expense saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1078,6 +1127,8 @@ async function handleArchiveExpense(expenseId) {
   try {
     await api("archiveExpense", { expenseId, reason });
     state.expenses = await api("listExpenses");
+    markFresh(["expenses"]);
+    markStale(["finances", "partners", "logs"]);
     setMessage("Expense archived");
   } catch (error) {
     setMessage(error.message, true);
@@ -1096,6 +1147,8 @@ async function handleCreateHandover() {
       }]
     });
     state.receipts = await api("listReceipts");
+    markFresh(["receipts"]);
+    markStale(["partners", "logs"]);
     setMessage("Cash handover saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1107,6 +1160,8 @@ async function handleSaveSettings() {
     await api("saveBasicSettings", { schoolName: qs("#setup-school-name").value.trim() });
     await api("setAcademicYear", { academicYear: qs("#setup-year").value.trim() });
     state.bootstrap = await api("getBootstrap");
+    markFresh(["setup"]);
+    markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs"]);
     setMessage("Settings updated");
   } catch (error) {
     setMessage(error.message, true);
@@ -1122,6 +1177,8 @@ async function handleSaveClass() {
       }]
     });
     state.bootstrap = await api("getBootstrap");
+    markFresh(["setup"]);
+    markStale(["students", "dashboard"]);
     setMessage("Class added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1137,6 +1194,8 @@ async function handleSaveSchedule() {
       }]
     });
     state.bootstrap = await api("getBootstrap");
+    markFresh(["setup"]);
+    markStale(["students", "dueReport", "dashboard"]);
     setMessage("Schedule added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1149,6 +1208,7 @@ async function handleSaveCategory() {
       categories: [qs("#setup-category-name").value.trim()]
     });
     state.bootstrap = await api("getBootstrap");
+    markFresh(["setup"]);
     setMessage("Category added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1172,6 +1232,8 @@ async function handleSavePartner() {
       partners
     });
     state.bootstrap = await api("getBootstrap");
+    markFresh(["setup"]);
+    markStale(["partners", "finances", "logs"]);
     setMessage("Partner set saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1292,4 +1354,3 @@ function exportCurrentView() {
 
 render();
 init();
-
