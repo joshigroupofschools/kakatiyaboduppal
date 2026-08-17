@@ -50,6 +50,8 @@ const state = {
     dates: [""]
   },
   setupSection: "heads",
+  collectSearch: "",
+  collectStudentId: "",
   selectedReceipt: null,
   message: "",
   error: "",
@@ -157,7 +159,7 @@ function setMessage(message, isError = false) {
       state.error = "";
       state.messageTimerId = null;
       render();
-    }, 5000);
+    }, 10000);
   }
 }
 
@@ -206,11 +208,8 @@ async function loadViewData(view) {
     render();
     return;
   }
-  const isSlowView = SLOW_VIEWS.has(view);
-  if (isSlowView) {
-    startLoading(view);
-    render();
-  }
+  startLoading(view);
+  render();
   try {
     if (view === "dashboard" && (state.stale.dashboard || !state.dashboard)) {
       state.dashboard = await api("getDashboard");
@@ -264,9 +263,7 @@ async function loadViewData(view) {
       await ensureBootstrapData();
     }
   } finally {
-    if (isSlowView) {
-      stopLoading();
-    }
+    stopLoading();
   }
   render();
 }
@@ -274,7 +271,7 @@ async function loadViewData(view) {
 function visibleMenu() {
   const items = [
     ["dashboard", "Dashboard"],
-    ["students", "Fees Table"],
+    ["students", "Students"],
     ["collect", "Collect Fees"],
     ["receipts", "Receipts"],
     ["due-report", "Due Report"],
@@ -366,7 +363,7 @@ function renderTimedLoading(title, description) {
       <div class="pill">Fetching ${title}</div>
       <div class="loading-time">${elapsed}</div>
       <div>${description}</div>
-      <div class="muted">This module is lower priority for morning collections. It can take up to 1 minute on larger datasets.</div>
+      <div class="muted">Please wait. If loading takes more than 10 seconds, keep this screen open until the timer stops.</div>
     </div>
   `;
 }
@@ -516,6 +513,16 @@ function renderLedgerPanel(ledger) {
 
 function renderCollectFees() {
   const activeStudents = state.students.filter(item => item.status === "Active");
+  const searchText = String(state.collectSearch || "").trim().toLowerCase();
+  const filteredStudents = activeStudents.filter(item => {
+    if (!searchText) return true;
+    return String(item.studentName || "").toLowerCase().includes(searchText) ||
+      String(item.mobileNumber || "").toLowerCase().includes(searchText) ||
+      String(item.className || "").toLowerCase().includes(searchText);
+  });
+  const selectedStudentId = state.collectStudentId && filteredStudents.some(item => item.studentId === state.collectStudentId)
+    ? state.collectStudentId
+    : safe(filteredStudents, "0.studentId", "");
   if (!activeStudents.length) {
     return `
       <div class="panel stack">
@@ -528,9 +535,12 @@ function renderCollectFees() {
     <div class="panel stack">
       <h3>Collect Fees</h3>
       <div class="form-grid">
+        <label>Search Student
+          <input id="collect-student-search" value="${state.collectSearch || ""}" oninput="handleCollectStudentSearch()" placeholder="Search by name, mobile, or class" />
+        </label>
         <label>Student
-          <select id="collect-student">
-            ${activeStudents.map(item => `<option value="${item.studentId}">${item.studentName} - ${item.className} - ${item.mobileNumber}</option>`).join("")}
+          <select id="collect-student" onchange="handleCollectStudentSelect()">
+            ${filteredStudents.map(item => `<option value="${item.studentId}" ${selectedStudentId === item.studentId ? "selected" : ""}>${item.studentName} - ${item.className} - ${item.mobileNumber}</option>`).join("")}
           </select>
         </label>
         <label>Payment Date<input id="collect-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
@@ -544,6 +554,7 @@ function renderCollectFees() {
         <label id="upi-ref-wrap">UPI Ref<input id="collect-upi-ref" /></label>
         <label id="upi-in-wrap">UPI Received In<input id="collect-upi-in" placeholder="School account or Partner name" /></label>
       </div>
+      ${filteredStudents.length ? "" : `<div class="muted">No student matched that search.</div>`}
       <button class="primary" onclick="handleCollectFees()">Create Receipt</button>
       <div class="muted">Default allocation uses oldest unpaid instalments first. Manual allocation is supported by the backend payload, and can be extended in this UI later.</div>
     </div>
@@ -752,7 +763,6 @@ function renderAnalytics() {
   }
   if (!state.analytics) return `<div class="panel">Loading...</div>`;
   const feeHeadBreakdown = Array.isArray(state.analytics.feeHeadBreakdown) ? state.analytics.feeHeadBreakdown : [];
-  const metricEntries = Object.entries(state.analytics).filter(([key]) => key !== "feeHeadBreakdown");
   return `
     <div class="grid">
       <div class="panel">
@@ -771,38 +781,15 @@ function renderAnalytics() {
         { label: "Active Students", value: state.analytics.activeStudents, kind: "number" },
         { label: "Total Fees Assigned", value: state.analytics.totalFeesAssigned, kind: "currency" },
         { label: "Total Collected", value: state.analytics.totalFeesCollected, kind: "currency" },
-        { label: "Due As Of Date", value: state.analytics.feesDueAsOfDate, kind: "currency" }
-      ])}
-      <div class="panel">
-        ${renderTable(
-          ["Metric", "Value"],
-          metricEntries.map(([key, value]) => [
-            key,
-            key === "activeStudents"
-              ? formatValue(value, "number")
-              : key === "duePercentage"
-                ? `${Number(value || 0).toFixed(2)}%`
-                : typeof value === "number"
-                  ? formatCurrency(value)
-                  : value
-          ])
-        )}
-      </div>
-      ${feeHeadBreakdown.length ? `
-        <div class="panel">
-          <h3>Fee Head Breakdown</h3>
-          ${renderTable(
-            ["Fee Head", "Assigned", "Payable", "Collected", "Due"],
-            feeHeadBreakdown.map(item => [
-              item.feeHead,
-              formatCurrency(item.assigned),
-              formatCurrency(item.payableAsOfDate),
-              formatCurrency(item.collected),
-              formatCurrency(item.dueAsOfDate)
-            ])
-          )}
-        </div>
-      ` : ""}
+        { label: "Due As Of Date", value: state.analytics.feesDueAsOfDate, kind: "currency" },
+        { label: "Cash Collected", value: state.analytics.cashCollected, kind: "currency" },
+        { label: "UPI Collected", value: state.analytics.upiCollected, kind: "currency" },
+        { label: "Due Percentage", value: `${Number(state.analytics.duePercentage || 0).toFixed(2)}%`, kind: "text" }
+      ].concat(feeHeadBreakdown.map(item => ({
+        label: `${item.feeHead} Due`,
+        value: item.dueAsOfDate,
+        kind: "currency"
+      }))))}
     </div>
   `;
 }
@@ -1110,6 +1097,7 @@ function renderMain() {
     setup: renderSetup
   };
   const activeRenderer = contentMap[state.view] || renderDashboard;
+  const loadingTitle = String(state.view || "module").replace(/-/g, " ");
   return `
     <div class="shell">
       <aside class="sidebar">
@@ -1138,7 +1126,7 @@ function renderMain() {
         </div>
         ${state.message ? `<div class="success">${state.message}</div>` : ""}
         ${state.error ? `<div class="error">${state.error}</div>` : ""}
-        ${activeRenderer()}
+        ${state.loading.active ? renderTimedLoading(loadingTitle, "Loading module data.") : activeRenderer()}
       </main>
     </div>
   `;
@@ -1322,8 +1310,12 @@ async function handleSubmitReassign() {
 
 async function handleCollectFees() {
   try {
+    const selectedStudent = qs("#collect-student");
+    if (!selectedStudent || !selectedStudent.value) {
+      throw new Error("Select a student before collecting fees");
+    }
     const payload = {
-      studentId: qs("#collect-student").value,
+      studentId: selectedStudent.value,
       paymentDate: qs("#collect-date").value,
       amount: Number(qs("#collect-amount").value),
       paymentMode: qs("#collect-mode").value,
@@ -1550,6 +1542,24 @@ async function handleDeleteFeeHead(headId) {
 
 function handleScheduleHeadChange() {
   state.scheduleDraft.feeHead = qs("#setup-schedule-head") ? qs("#setup-schedule-head").value : "";
+}
+
+function handleCollectStudentSearch() {
+  state.collectSearch = qs("#collect-student-search") ? qs("#collect-student-search").value : "";
+  const activeStudents = state.students.filter(item => item.status === "Active");
+  const searchText = String(state.collectSearch || "").trim().toLowerCase();
+  const filteredStudents = activeStudents.filter(item => {
+    if (!searchText) return true;
+    return String(item.studentName || "").toLowerCase().includes(searchText) ||
+      String(item.mobileNumber || "").toLowerCase().includes(searchText) ||
+      String(item.className || "").toLowerCase().includes(searchText);
+  });
+  state.collectStudentId = filteredStudents.length ? filteredStudents[0].studentId : "";
+  render();
+}
+
+function handleCollectStudentSelect() {
+  state.collectStudentId = qs("#collect-student") ? qs("#collect-student").value : "";
 }
 
 function handleScheduleCountChange() {

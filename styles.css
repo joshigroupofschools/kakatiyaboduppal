@@ -39,6 +39,7 @@ body {
   color: var(--ink);
   line-height: 1.5;
   background: linear-gradient(180deg, var(--bg-1) 0%, var(--bg-2) 100%);
+  overflow-x: hidden;
 }
 
 #app {
@@ -49,6 +50,7 @@ body {
   display: grid;
   grid-template-columns: 290px minmax(0, 1fr);
   min-height: 100vh;
+  width: 100%;
 }
 
 .sidebar {
@@ -152,6 +154,7 @@ button.danger {
 .content {
   min-width: 0;
   padding: 20px;
+  width: 100%;
 }
 
 .toolbar {
@@ -419,6 +422,7 @@ button.danger:hover,
   border-radius: 14px;
   background: #ffffff;
   -webkit-overflow-scrolling: touch;
+  max-width: 100%;
 }
 
 table {
@@ -485,10 +489,16 @@ tbody tr:hover {
 
 .error,
 .success {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 1000;
+  width: min(360px, calc(100vw - 32px));
   padding: 12px 14px;
   border-radius: 14px;
   font-size: 0.92rem;
   border: 1px solid transparent;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.14);
 }
 
 .error {
@@ -738,6 +748,20 @@ tbody tr:hover {
     font-size: 15px;
   }
 
+  .shell,
+  .sidebar,
+  .content,
+  .toolbar,
+  .panel,
+  .grid,
+  .split,
+  .cards,
+  .setup-shell,
+  .setup-grid {
+    width: 100%;
+    min-width: 0;
+  }
+
   .content {
     padding: 14px;
   }
@@ -820,7 +844,8 @@ tbody tr:hover {
   }
 
   table {
-    min-width: 560px;
+    min-width: 0;
+    width: 100%;
   }
 }
 
@@ -843,6 +868,6 @@ tbody tr:hover {
   }
 
   table {
-    min-width: 560px;
+    min-width: 0;
   }
 }
