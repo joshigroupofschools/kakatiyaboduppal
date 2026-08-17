@@ -819,7 +819,9 @@ function renderSetup() {
             </select>
           </label>
           <label>Due Date<input id="setup-schedule-date" type="date" /></label>
+          <label>No. of Instalments<input id="setup-schedule-count" type="number" min="1" max="24" value="1" /></label>
         </div>
+        <div class="muted">If you enter more than 1 instalment, monthly due dates will be created starting from the selected date.</div>
         <button class="primary" onclick="handleSaveSchedule()">Add Schedule</button>
       </div>
       <div class="panel stack">
@@ -1230,7 +1232,8 @@ async function handleSaveSchedule() {
     await api("saveSchedules", {
       schedules: [{
         feeHead: qs("#setup-schedule-head").value,
-        dueDate: qs("#setup-schedule-date").value
+        dueDate: qs("#setup-schedule-date").value,
+        instalmentCount: Number(qs("#setup-schedule-count").value || 1)
       }]
     });
     setBootstrap(await api("getBootstrap"));
@@ -1394,3 +1397,4 @@ function exportCurrentView() {
 
 render();
 init();
+
