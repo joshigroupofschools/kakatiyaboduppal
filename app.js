@@ -46,7 +46,8 @@ const state = {
   reassignDraft: null,
   selectedReceipt: null,
   message: "",
-  error: ""
+  error: "",
+  messageTimerId: null
 };
 
 const SLOW_VIEWS = new Set(["logs", "analytics", "finances", "partners"]);
@@ -137,9 +138,21 @@ async function api(action, payload = {}, token = state.token) {
 }
 
 function setMessage(message, isError = false) {
+  if (state.messageTimerId) {
+    window.clearTimeout(state.messageTimerId);
+    state.messageTimerId = null;
+  }
   state.message = isError ? "" : message;
   state.error = isError ? message : "";
   render();
+  if (message) {
+    state.messageTimerId = window.setTimeout(() => {
+      state.message = "";
+      state.error = "";
+      state.messageTimerId = null;
+      render();
+    }, 5000);
+  }
 }
 
 function setBootstrap(patch) {
@@ -1504,3 +1517,5 @@ function exportCurrentView() {
 
 render();
 init();
+
+
