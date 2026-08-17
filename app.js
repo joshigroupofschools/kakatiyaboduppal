@@ -399,6 +399,7 @@ function renderStudents() {
   const ledger = state.ledger;
   const classes = safe(state, "bootstrap.classes", []);
   const feeHeads = safe(state, "bootstrap.feeHeads", []);
+  const role = safe(state, "bootstrap.role", "");
   const reassignStudent = state.reassignDraft
     ? state.students.find(item => item.studentId === state.reassignDraft.studentId)
     : null;
@@ -452,6 +453,7 @@ function renderStudents() {
               <button class="secondary" onclick="handleOpenLedger('${item.studentId}')">Ledger</button>
               <button class="secondary" onclick="handleToggleStudentStatus('${item.studentId}','${item.status}')">${item.status === "Active" ? "Inactivate" : "Reactivate"}</button>
               <button class="secondary" onclick="handleStartReassign('${item.studentId}')">Reassign</button>
+              ${role === "Senior Admin" ? `<button class="danger" onclick="handleDeleteStudent('${item.studentId}')">Delete</button>` : ""}
             </div>`
           ])
         )}
@@ -1252,6 +1254,23 @@ async function handleToggleStudentStatus(studentId, currentStatus) {
       state.ledger = await api("getStudentLedger", { studentId });
     }
     setMessage("Student status updated");
+  } catch (error) {
+    setMessage(error.message, true);
+  }
+}
+
+async function handleDeleteStudent(studentId) {
+  const deleteCode = prompt("Type DELETE to permanently delete this child");
+  if (!deleteCode) return;
+  try {
+    await api("deleteStudent", { studentId, deleteCode: deleteCode.trim() });
+    state.students = await api("listStudents");
+    markFresh(["students"]);
+    markStale(["dashboard", "dueReport", "analytics", "finances", "logs"]);
+    if (state.ledger && state.ledger.student["Student ID"] === studentId) {
+      state.ledger = null;
+    }
+    setMessage("Student permanently deleted");
   } catch (error) {
     setMessage(error.message, true);
   }
