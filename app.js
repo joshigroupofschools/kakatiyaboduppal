@@ -15,6 +15,8 @@ const state = {
   token: localStorage.getItem("feeToken") || "",
   bootstrap: JSON.parse(localStorage.getItem("feeBootstrap") || "null"),
   view: "dashboard",
+  mobileMenuOpen: false,
+  studentModalOpen: false,
   stale: {
     dashboard: true,
     students: true,
@@ -33,6 +35,12 @@ const state = {
     startedAt: 0,
     timerId: null
   },
+  actionLoading: {
+    active: false,
+    label: "",
+    startedAt: 0,
+    timerId: null
+  },
   dashboard: null,
   students: [],
   receipts: [],
@@ -43,6 +51,7 @@ const state = {
   partners: [],
   logs: [],
   ledger: null,
+  collectLedger: null,
   reassignDraft: null,
   scheduleDraft: {
     feeHead: "",
@@ -52,7 +61,11 @@ const state = {
   setupSection: "heads",
   collectSearch: "",
   collectStudentId: "",
+  studentSearch: "",
+  studentClassFilter: "",
+  studentStatusFilter: "",
   selectedReceipt: null,
+  secretPrompt: null,
   message: "",
   error: "",
   messageTimerId: null
@@ -114,6 +127,34 @@ function stopLoading() {
   state.loading.view = "";
   state.loading.startedAt = 0;
   state.loading.timerId = null;
+}
+
+function startActionLoading(label) {
+  stopActionLoading();
+  state.actionLoading.active = true;
+  state.actionLoading.label = label || "Processing";
+  state.actionLoading.startedAt = Date.now();
+  state.actionLoading.timerId = window.setInterval(() => render(), 1000);
+  render();
+}
+
+function stopActionLoading() {
+  if (state.actionLoading.timerId) {
+    window.clearInterval(state.actionLoading.timerId);
+  }
+  state.actionLoading.active = false;
+  state.actionLoading.label = "";
+  state.actionLoading.startedAt = 0;
+  state.actionLoading.timerId = null;
+}
+
+async function runAction(label, work) {
+  startActionLoading(label);
+  try {
+    return await work();
+  } finally {
+    stopActionLoading();
+  }
 }
 
 function markStale(keys) {
@@ -208,7 +249,22 @@ async function loadViewData(view) {
     render();
     return;
   }
-  startLoading(view);
+  const needsFetch =
+    (view === "dashboard" && (state.stale.dashboard || !state.dashboard)) ||
+    (view === "students" && (state.stale.students || !state.students.length)) ||
+    (view === "collect" && (state.stale.students || !state.students.length)) ||
+    (view === "receipts" && (state.stale.receipts || !state.receipts.length)) ||
+    (view === "expenses" && (state.stale.expenses || !state.expenses.length)) ||
+    (view === "handover" && (state.stale.receipts || !state.receipts.length)) ||
+    (view === "due-report" && state.stale.dueReport) ||
+    (view === "analytics" && state.stale.analytics) ||
+    (view === "finances" && state.stale.finances) ||
+    (view === "partners" && state.stale.partners) ||
+    (view === "logs" && state.stale.logs) ||
+    (view === "setup" && (state.stale.setup || !state.bootstrap));
+  if (needsFetch) {
+    startLoading(view);
+  }
   render();
   try {
     if (view === "dashboard" && (state.stale.dashboard || !state.dashboard)) {
@@ -271,9 +327,8 @@ async function loadViewData(view) {
 function visibleMenu() {
   const items = [
     ["dashboard", "Dashboard"],
-    ["students", "Students"],
+    ["students", "Student Fees Data"],
     ["collect", "Collect Fees"],
-    ["receipts", "Receipts"],
     ["due-report", "Due Report"],
     ["expenses", "Expenses"],
     ["handover", "Cash Handover"]
@@ -368,6 +423,69 @@ function renderTimedLoading(title, description) {
   `;
 }
 
+function renderActionOverlay() {
+  if (!state.actionLoading.active) return "";
+  const elapsed = state.actionLoading.startedAt ? formatElapsed(Date.now() - state.actionLoading.startedAt) : "00:00";
+  return `
+    <div class="action-overlay">
+      <div class="action-overlay-card">
+        <div class="pill">Please wait</div>
+        <div class="loading-time">${elapsed}</div>
+        <div class="action-overlay-title">${state.actionLoading.label}</div>
+        <div class="muted">The system is completing your request.</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderSecretPrompt() {
+  if (!state.secretPrompt) return "";
+  return `
+    <div class="action-overlay">
+      <div class="action-overlay-card secret-card">
+        <h3>${state.secretPrompt.title || "Confirm Action"}</h3>
+        <div class="muted">${state.secretPrompt.message || ""}</div>
+        <label>Password
+          <input id="secret-code-input" type="password" autocomplete="off" />
+        </label>
+        <div class="actions-row">
+          <button class="secondary" onclick="cancelSecretPrompt()">Cancel</button>
+          <button class="danger" onclick="submitSecretPrompt()">Continue</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function requestSecretCode(title, message) {
+  return new Promise(resolve => {
+    state.secretPrompt = { title, message, resolve };
+    render();
+    window.setTimeout(() => {
+      const input = qs("#secret-code-input");
+      if (input) input.focus();
+    }, 0);
+  });
+}
+
+function cancelSecretPrompt() {
+  if (!state.secretPrompt) return;
+  const resolve = state.secretPrompt.resolve;
+  state.secretPrompt = null;
+  render();
+  resolve("");
+}
+
+function submitSecretPrompt() {
+  if (!state.secretPrompt) return;
+  const input = qs("#secret-code-input");
+  const value = input ? input.value.trim() : "";
+  const resolve = state.secretPrompt.resolve;
+  state.secretPrompt = null;
+  render();
+  resolve(value);
+}
+
 function renderDashboard() {
   if (!state.dashboard) return `<div class="panel">Loading...</div>`;
   return `
@@ -377,7 +495,7 @@ function renderDashboard() {
         value: card.value,
         kind: card.label.includes("Students") ? "number" : "currency"
       })))}
-      <div class="panel">
+      <div class="panel panel-wide">
         <h3>Recent Receipts</h3>
         ${renderTable(
           ["Receipt No", "Date", "Student", "Mode", "Amount", "Status"],
@@ -395,11 +513,31 @@ function renderDashboard() {
   `;
 }
 
+function renderReportActions() {
+  return `
+    <div class="section-actions">
+      <button class="secondary" onclick="exportCurrentView()">Download CSV</button>
+    </div>
+  `;
+}
+
 function renderStudents() {
   const ledger = state.ledger;
   const classes = safe(state, "bootstrap.classes", []);
   const feeHeads = safe(state, "bootstrap.feeHeads", []);
   const role = safe(state, "bootstrap.role", "");
+  const searchText = String(state.studentSearch || "").trim().toLowerCase();
+  const classFilter = String(state.studentClassFilter || "");
+  const statusFilter = String(state.studentStatusFilter || "");
+  const filteredStudents = state.students.filter(item => {
+    const matchesSearch = !searchText ||
+      String(item.studentName || "").toLowerCase().includes(searchText) ||
+      String(item.mobileNumber || "").toLowerCase().includes(searchText) ||
+      String(item.className || "").toLowerCase().includes(searchText);
+    const matchesClass = !classFilter || String(item.className || "") === classFilter;
+    const matchesStatus = !statusFilter || String(item.status || "") === statusFilter;
+    return matchesSearch && matchesClass && matchesStatus;
+  });
   const reassignStudent = state.reassignDraft
     ? state.students.find(item => item.studentId === state.reassignDraft.studentId)
     : null;
@@ -436,10 +574,53 @@ function renderStudents() {
         <button class="primary" onclick="handleAddStudent()">Save Student</button>
       </div>
       <div class="panel">
-        <h3>Fees Table</h3>
+        <div class="section-head">
+          <h3>Student Fee Register</h3>
+          <div class="muted">Filter by class, status, name, or mobile for faster work.</div>
+        </div>
+        <div class="inline-form">
+          <input id="student-search" value="${state.studentSearch || ""}" oninput="handleStudentFilters()" placeholder="Search by student, mobile, or class" />
+          <select id="student-class-filter" onchange="handleStudentFilters()">
+            <option value="">All Classes</option>
+            ${classes.map(item => `<option value="${item.className}" ${state.studentClassFilter === item.className ? "selected" : ""}>${item.className}</option>`).join("")}
+          </select>
+          <select id="student-status-filter" onchange="handleStudentFilters()">
+            <option value="">All Statuses</option>
+            <option value="Active" ${state.studentStatusFilter === "Active" ? "selected" : ""}>Active</option>
+            <option value="Inactive" ${state.studentStatusFilter === "Inactive" ? "selected" : ""}>Inactive</option>
+          </select>
+          <div class="pill">${filteredStudents.length} students</div>
+        </div>
+        <div class="student-card-list">
+          ${filteredStudents.map(item => `
+            <div class="student-card">
+              <div class="student-card-head">
+                <div>
+                  <div class="student-name">${item.studentName}</div>
+                  <div class="muted">${item.className} • ${item.mobileNumber}</div>
+                </div>
+                <div class="pill">${item.status}</div>
+              </div>
+              <div class="student-card-stats">
+                <div><span>Assigned</span><strong>${formatCurrency(item.totalAssigned)}</strong></div>
+                <div><span>Paid</span><strong>${formatCurrency(item.totalPaid)}</strong></div>
+                <div><span>Overall Due</span><strong>${formatCurrency(item.overallDue)}</strong></div>
+                <div><span>Due Today</span><strong>${formatCurrency(item.dueAsOfToday)}</strong></div>
+              </div>
+              <div class="muted">${item.feeHeadSummary || "-"}</div>
+              <div class="actions-row">
+                <button class="secondary" onclick="handleOpenLedger('${item.studentId}')">Ledger</button>
+                <button class="secondary" onclick="handleToggleStudentStatus('${item.studentId}','${item.status}')">${item.status === "Active" ? "Inactivate" : "Reactivate"}</button>
+                <button class="secondary" onclick="handleStartReassign('${item.studentId}')">Reassign</button>
+                ${role === "Senior Admin" ? `<button class="danger" onclick="handleDeleteStudent('${item.studentId}')">Delete</button>` : ""}
+              </div>
+            </div>
+          `).join("") || `<div class="muted">No students matched the selected filters.</div>`}
+        </div>
+        <div class="desktop-only">
         ${renderTable(
           ["Class", "Student", "Mobile", "Fee Heads", "Assigned", "Paid", "Overall Due", "Due Today", "Status", "Actions"],
-          state.students.map(item => [
+          filteredStudents.map(item => [
             item.className,
             item.studentName,
             item.mobileNumber,
@@ -457,6 +638,7 @@ function renderStudents() {
             </div>`
           ])
         )}
+        </div>
         ${reassignStudent ? `
           <div class="detail-panel stack">
             <h3>Reassign Fee Head</h3>
@@ -477,6 +659,172 @@ function renderStudents() {
           </div>
         ` : ""}
         ${ledger ? renderLedgerPanel(ledger) : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderStudentWorkspace() {
+  const ledger = state.ledger;
+  const classes = safe(state, "bootstrap.classes", []);
+  const feeHeads = safe(state, "bootstrap.feeHeads", []);
+  const role = safe(state, "bootstrap.role", "");
+  const searchText = String(state.studentSearch || "").trim().toLowerCase();
+  const classFilter = String(state.studentClassFilter || "");
+  const statusFilter = String(state.studentStatusFilter || "");
+  const filteredStudents = state.students.filter(item => {
+    const matchesSearch = !searchText ||
+      String(item.studentName || "").toLowerCase().includes(searchText) ||
+      String(item.mobileNumber || "").toLowerCase().includes(searchText) ||
+      String(item.className || "").toLowerCase().includes(searchText);
+    const matchesClass = !classFilter || String(item.className || "") === classFilter;
+    const matchesStatus = !statusFilter || String(item.status || "") === statusFilter;
+    return matchesSearch && matchesClass && matchesStatus;
+  });
+  const reassignStudent = state.reassignDraft
+    ? state.students.find(item => item.studentId === state.reassignDraft.studentId)
+    : null;
+  return `
+    <div class="stack">
+      <div class="panel">
+        <div class="section-head">
+          <h3>Student Fee Register</h3>
+          <div class="muted">Filter by class, status, name, or mobile for faster work.</div>
+        </div>
+        <div class="inline-form">
+          <button class="primary" onclick="openStudentModal()">Add Student</button>
+          <input id="student-search" value="${state.studentSearch || ""}" oninput="handleStudentFilters()" placeholder="Search by student or mobile" />
+          <select id="student-class-filter" onchange="handleStudentFilters()">
+            <option value="">All Classes</option>
+            ${classes.map(item => `<option value="${item.className}" ${state.studentClassFilter === item.className ? "selected" : ""}>${item.className}</option>`).join("")}
+          </select>
+          <select id="student-status-filter" onchange="handleStudentFilters()">
+            <option value="">All Statuses</option>
+            <option value="Active" ${state.studentStatusFilter === "Active" ? "selected" : ""}>Active</option>
+            <option value="Inactive" ${state.studentStatusFilter === "Inactive" ? "selected" : ""}>Inactive</option>
+          </select>
+          <div class="pill">${filteredStudents.length} students</div>
+        </div>
+        <div class="student-card-list">
+          ${filteredStudents.map(item => `
+            <div class="student-card">
+              <div class="student-card-head">
+                <div>
+                  <div class="student-name">${item.studentName}</div>
+                  <div class="muted">${item.className} · ${item.mobileNumber}</div>
+                </div>
+                <div class="pill">${item.status}</div>
+              </div>
+              <div class="student-card-stats">
+                <div><span>Assigned</span><strong>${formatCurrency(item.totalAssigned)}</strong></div>
+                <div><span>Paid</span><strong>${formatCurrency(item.totalPaid)}</strong></div>
+                <div><span>Overall Due</span><strong>${formatCurrency(item.overallDue)}</strong></div>
+                <div><span>Due Today</span><strong>${formatCurrency(item.dueAsOfToday)}</strong></div>
+              </div>
+              <div class="muted">${item.feeHeadSummary || "-"}</div>
+              <div class="actions-row">
+                <button class="secondary" onclick="handleOpenLedger('${item.studentId}')">Ledger</button>
+                <button class="secondary" onclick="handleToggleStudentStatus('${item.studentId}','${item.status}')">${item.status === "Active" ? "Inactivate" : "Reactivate"}</button>
+                <button class="secondary" onclick="handleStartReassign('${item.studentId}')">Reassign</button>
+                ${role === "Senior Admin" ? `<button class="danger" onclick="handleDeleteStudent('${item.studentId}')">Delete</button>` : ""}
+              </div>
+            </div>
+          `).join("") || `<div class="muted">No students matched the selected filters.</div>`}
+        </div>
+        <div class="desktop-only">
+          ${renderTable(
+            ["Class", "Student", "Mobile", "Actual Fee", "Committed", "Concession", "Fee Heads", "Assigned", "Paid", "Overall Due", "Due Today", "Status", "Actions"],
+            filteredStudents.map(item => [
+              item.className,
+              item.studentName,
+              item.mobileNumber,
+              formatCurrency(item.actualSchoolFee),
+              formatCurrency(item.committedSchoolFee),
+              formatCurrency(item.concession),
+              item.feeHeadSummary || "-",
+              formatCurrency(item.totalAssigned),
+              formatCurrency(item.totalPaid),
+              formatCurrency(item.overallDue),
+              formatCurrency(item.dueAsOfToday),
+              item.status,
+              `<div class="actions-row">
+                <button class="secondary" onclick="handleOpenLedger('${item.studentId}')">Ledger</button>
+                <button class="secondary" onclick="handleToggleStudentStatus('${item.studentId}','${item.status}')">${item.status === "Active" ? "Inactivate" : "Reactivate"}</button>
+                <button class="secondary" onclick="handleStartReassign('${item.studentId}')">Reassign</button>
+                ${role === "Senior Admin" ? `<button class="danger" onclick="handleDeleteStudent('${item.studentId}')">Delete</button>` : ""}
+              </div>`
+            ])
+          )}
+        </div>
+      </div>
+      ${reassignStudent ? `
+        <div class="panel detail-panel stack">
+          <h3>Reassign Fee Head</h3>
+          <div class="muted">${reassignStudent.studentName} · ${reassignStudent.className}</div>
+          <div class="form-grid">
+            <label>Fee Head
+              <select id="reassign-fee-head">
+                ${feeHeads.map(item => `<option value="${item.headName}" ${state.reassignDraft.feeHead === item.headName ? "selected" : ""}>${item.headName}</option>`).join("")}
+              </select>
+            </label>
+            <label>New Amount<input id="reassign-amount" type="number" min="0" value="${state.reassignDraft.newAmount || 0}" /></label>
+            <label>Reason<input id="reassign-reason" value="${state.reassignDraft.reason || ""}" /></label>
+          </div>
+          <div class="actions-row">
+            <button class="primary" onclick="handleSubmitReassign()">Save Reassignment</button>
+            <button class="secondary" onclick="handleCancelReassign()">Cancel</button>
+          </div>
+        </div>
+      ` : ""}
+      ${ledger ? renderLedgerPanel(ledger) : ""}
+    </div>
+  `;
+}
+
+function renderStudentModal() {
+  const classes = safe(state, "bootstrap.classes", []);
+  const feeHeads = safe(state, "bootstrap.feeHeads", []);
+  const defaultClass = classes[0] || { classId: "", actualSchoolFee: 0 };
+  return `
+    <div class="action-overlay">
+      <div class="action-overlay-card student-modal-card">
+        <div class="modal-head">
+          <h3>Add Student</h3>
+          <button class="secondary" onclick="closeStudentModal()">Close</button>
+        </div>
+        <div class="form-grid">
+          <label>Student Name<input id="student-name" /></label>
+          <label>Class
+            <select id="student-class" onchange="handleStudentClassChange()">
+              ${classes.map(item => `<option value="${item.classId}" data-actual-fee="${Number(item.actualSchoolFee || 0)}">${item.className}</option>`).join("")}
+            </select>
+          </label>
+          <label>Mobile Number<input id="student-mobile" /></label>
+          <label>Status
+            <select id="student-status">
+              <option value="Active">Active</option>
+              <option value="Inactive">Inactive</option>
+            </select>
+          </label>
+          <label>Joined Date<input id="student-joined" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+          <label>Actual School Fee<input id="student-actual-fee" type="number" value="${Number(defaultClass.actualSchoolFee || 0)}" readonly /></label>
+          <label>Committed School Fee<input id="student-committed-fee" type="number" min="0" value="${Number(defaultClass.actualSchoolFee || 0)}" oninput="handleStudentCommittedFeeChange()" /></label>
+          <label>Concession<input id="student-concession" type="number" value="0" readonly /></label>
+        </div>
+        <div class="stack">
+          <h3>Fee Head Assignment</h3>
+          ${feeHeads.length ? `
+            <div class="form-grid">
+              ${feeHeads.map(item => `
+                <label>${item.headName}<input class="student-fee-head" data-head="${item.headName}" type="number" min="0" value="0" /></label>
+              `).join("")}
+            </div>
+          ` : `<div class="muted">Create fee heads first in Setup.</div>`}
+        </div>
+        <div class="actions-row">
+          <button class="primary" onclick="handleAddStudent()">Save Student</button>
+          <button class="secondary" onclick="closeStudentModal()">Cancel</button>
+        </div>
       </div>
     </div>
   `;
@@ -563,6 +911,111 @@ function renderCollectFees() {
   `;
 }
 
+function renderCollectFeesFast() {
+  const activeStudents = state.students.filter(item => item.status === "Active");
+  const searchText = String(state.collectSearch || "").trim().toLowerCase();
+  const filteredStudents = activeStudents.filter(item => {
+    if (!searchText) return true;
+    return String(item.studentName || "").toLowerCase().includes(searchText) ||
+      String(item.mobileNumber || "").toLowerCase().includes(searchText);
+  });
+  const selectedStudent = activeStudents.find(item => item.studentId === state.collectStudentId) || null;
+  const headSummary = summarizeCollectHeads(state.collectLedger);
+  const receiptRows = selectedStudent
+    ? state.receipts.filter(item => item["Student ID"] === selectedStudent.studentId).slice().reverse()
+    : [];
+  if (!activeStudents.length) {
+    return `
+      <div class="panel stack">
+        <h3>Collect Fees</h3>
+        <div class="muted">No active students are available. Add or reactivate a student first.</div>
+      </div>
+    `;
+  }
+  return `
+    <div class="stack">
+      <div class="panel stack">
+        <h3>Collect Fees</h3>
+        <label>Search Student Name / Mobile Number
+          <input id="collect-student-search" value="${state.collectSearch || ""}" oninput="handleCollectStudentSearch()" placeholder="Search student name or mobile number" />
+        </label>
+        <div class="collect-student-list">
+          ${filteredStudents.slice(0, 12).map(item => `
+            <button class="${state.collectStudentId === item.studentId ? "primary" : "secondary"}" onclick="handleSelectCollectStudent('${item.studentId}')">
+              ${item.studentName} · ${item.className} · ${item.mobileNumber}
+            </button>
+          `).join("") || `<div class="muted">No student matched that search.</div>`}
+        </div>
+      </div>
+      ${selectedStudent ? `
+        <div class="panel stack">
+          <div class="section-head">
+            <h3>${selectedStudent.studentName}</h3>
+            <div class="muted">${selectedStudent.className} · ${selectedStudent.mobileNumber}</div>
+          </div>
+          <div class="form-grid">
+            <label>Amount<input id="collect-amount" type="number" min="1" /></label>
+            <label>Fee Head
+              <select id="collect-head">
+                <option value="">Select Head</option>
+                ${headSummary.map(item => `<option value="${item.head}">${item.head} · Due ${formatCurrency(item.remaining)}</option>`).join("")}
+              </select>
+            </label>
+            <label>Payment Date<input id="collect-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+            <label>Mode
+              <select id="collect-mode" onchange="toggleModeFields()">
+                <option value="Cash">Cash</option>
+                <option value="UPI">UPI</option>
+              </select>
+            </label>
+            <label id="upi-ref-wrap">UPI Ref<input id="collect-upi-ref" /></label>
+            <label id="upi-in-wrap">UPI Received In<input id="collect-upi-in" placeholder="School account or Partner name" /></label>
+          </div>
+          <div class="student-card-stats">
+            ${headSummary.map(item => `<div><span>${item.head}</span><strong>${formatCurrency(item.remaining)}</strong></div>`).join("") || `<div><span>No open heads</span><strong>${formatCurrency(0)}</strong></div>`}
+          </div>
+          <button class="primary" onclick="handleCollectFees()">Create Receipt</button>
+        </div>
+        <div class="panel stack">
+          <h3>Receipts</h3>
+          ${receiptRows.length ? renderTable(
+            ["Receipt No", "Date", "Mode", "Amount", "Status", "Action"],
+            receiptRows.map(item => [
+              item["Receipt Number"],
+              item["Receipt Date"],
+              item["Payment Mode"],
+              formatCurrency(item["Amount"]),
+              item["Status"],
+              `<div class="actions-row">
+                <button class="secondary" onclick="handleOpenReceipt('${item["Receipt ID"]}')">View</button>
+                <button class="secondary" onclick="handlePrintReceipt('${item["Receipt ID"]}')">Print</button>
+                ${item["Status"] === "Valid" ? `<button class="danger" onclick="handleCancelReceipt('${item["Receipt ID"]}')">Cancel</button>` : ""}
+              </div>`
+            ])
+          ) : `<div class="muted">No receipts for this student yet.</div>`}
+          ${state.selectedReceipt ? renderReceiptPanel(state.selectedReceipt) : ""}
+        </div>
+      ` : ""}
+    </div>
+  `;
+}
+
+function summarizeCollectHeads(ledger) {
+  if (!ledger || !Array.isArray(ledger.instalments)) return [];
+  const map = {};
+  ledger.instalments
+    .filter(item => item["Status"] === "Active" && Number(item["Remaining Amount"] || 0) > 0)
+    .forEach(item => {
+      const head = item["Fee Head"];
+      if (!map[head]) {
+        map[head] = { head, remaining: 0, instalments: [] };
+      }
+      map[head].remaining += Number(item["Remaining Amount"] || 0);
+      map[head].instalments.push(item);
+    });
+  return Object.values(map).sort((a, b) => String(a.head).localeCompare(String(b.head)));
+}
+
 function renderReceipts() {
   const detail = state.selectedReceipt;
   return `
@@ -637,6 +1090,7 @@ function renderDueReport() {
   return `
     <div class="panel">
       <h3>Due Report</h3>
+      ${renderReportActions()}
       <div class="inline-form">
         <input id="due-date" type="date" value="${new Date().toISOString().slice(0, 10)}" />
         <select id="due-active-only">
@@ -765,9 +1219,13 @@ function renderAnalytics() {
   }
   if (!state.analytics) return `<div class="panel">Loading...</div>`;
   const feeHeadBreakdown = Array.isArray(state.analytics.feeHeadBreakdown) ? state.analytics.feeHeadBreakdown : [];
+  const totalCollected = Number(state.analytics.totalFeesCollected || 0);
+  const cashShare = totalCollected ? (Number(state.analytics.cashCollected || 0) / totalCollected) * 100 : 0;
+  const upiShare = totalCollected ? (Number(state.analytics.upiCollected || 0) / totalCollected) * 100 : 0;
   return `
     <div class="grid">
       <div class="panel">
+        ${renderReportActions()}
         <div class="inline-form">
           <input id="analytics-date" type="date" value="${new Date().toISOString().slice(0, 10)}" />
           <select id="analytics-mode">
@@ -786,7 +1244,9 @@ function renderAnalytics() {
         { label: "Due As Of Date", value: state.analytics.feesDueAsOfDate, kind: "currency" },
         { label: "Cash Collected", value: state.analytics.cashCollected, kind: "currency" },
         { label: "UPI Collected", value: state.analytics.upiCollected, kind: "currency" },
-        { label: "Due Percentage", value: `${Number(state.analytics.duePercentage || 0).toFixed(2)}%`, kind: "text" }
+        { label: "Due Percentage", value: `${Number(state.analytics.duePercentage || 0).toFixed(2)}%`, kind: "text" },
+        { label: "Cash Collection %", value: `${cashShare.toFixed(2)}%`, kind: "text" },
+        { label: "UPI Collection %", value: `${upiShare.toFixed(2)}%`, kind: "text" }
       ].concat(feeHeadBreakdown.map(item => ({
         label: `${item.feeHead} Due`,
         value: item.dueAsOfDate,
@@ -803,6 +1263,7 @@ function renderFinances() {
   return `
     <div class="panel">
       <h3>Finances</h3>
+      ${renderReportActions()}
       ${renderTable(
         ["Metric", "Value"],
         Object.entries(state.finances || {}).map(([key, value]) => [key, typeof value === "number" ? formatCurrency(value) : value])
@@ -818,6 +1279,7 @@ function renderPartners() {
   return `
     <div class="panel">
       <h3>Partner Accounts</h3>
+      ${renderReportActions()}
       ${renderTable(
         ["Partner", "Share %", "Shortfall", "Profit Share", "Expenses Paid", "Collections Received", "Net Contribution", "Still Required", "Excess"],
         state.partners.map(item => [
@@ -843,6 +1305,7 @@ function renderLogs() {
   return `
     <div class="panel">
       <h3>Logs</h3>
+      ${renderReportActions()}
       <div class="inline-form">
         <input id="logs-login-id" placeholder="Login ID" />
         <input id="logs-action" placeholder="Action" />
@@ -905,6 +1368,7 @@ function renderSetup() {
           <label>School Name<input id="setup-school-name" value="${schoolName}" /></label>
           <label>Academic Year<input id="setup-year" value="${academicYear}" /></label>
           <button class="primary" onclick="handleSaveSettings()">Save Settings</button>
+          <button class="secondary" onclick="handleChangePassword()">Change Password</button>
         </div>
         <div class="panel stack setup-card">
           <div class="section-head">
@@ -913,6 +1377,7 @@ function renderSetup() {
           </div>
           <div class="form-grid">
             <label>Class Name<input id="setup-class-name" /></label>
+            <label>Actual School Fee<input id="setup-class-actual-fee" type="number" min="0" value="0" /></label>
           </div>
           <button class="primary" onclick="handleSaveClass()">Add Class</button>
           <div class="pill-cloud">${classOptions || '<span class="muted">No classes yet</span>'}</div>
@@ -1084,10 +1549,11 @@ function renderMain() {
   const academicYear = safe(state, "bootstrap.academicYear", "");
   const userId = safe(state, "bootstrap.userId", "");
   const role = safe(state, "bootstrap.role", "");
+  const currentViewLabel = visibleMenu().find(item => item[0] === state.view)?.[1] || "Dashboard";
   const contentMap = {
     dashboard: renderDashboard,
-    students: renderStudents,
-    collect: renderCollectFees,
+    students: renderStudentWorkspace,
+    collect: renderCollectFeesFast,
     receipts: renderReceipts,
     "due-report": renderDueReport,
     expenses: renderExpenses,
@@ -1102,7 +1568,15 @@ function renderMain() {
   const loadingTitle = String(state.view || "module").replace(/-/g, " ");
   return `
     <div class="shell">
-      <aside class="sidebar">
+      <div class="mobile-topbar">
+        <div class="mobile-title">
+          <strong>${schoolName}</strong>
+          <span>${currentViewLabel}</span>
+        </div>
+        <button class="menu-toggle" onclick="toggleMobileMenu()">Menu</button>
+      </div>
+      ${state.mobileMenuOpen ? `<button class="menu-backdrop" onclick="closeMobileMenu()" aria-label="Close menu"></button>` : ""}
+      <aside class="sidebar ${state.mobileMenuOpen ? "open" : ""}">
         <div class="sidebar-top">
           <div class="eyebrow">Academic Operations</div>
           <div class="brand">${schoolName}</div>
@@ -1114,22 +1588,15 @@ function renderMain() {
         </div>
       </aside>
       <main class="content">
-        <div class="toolbar">
-          <div class="toolbar-copy">
-            <div class="eyebrow">Live Overview</div>
-            <div class="brand">School Fee Management</div>
-            <div class="muted">Counter-first fee operations with reports separated from daily rush work.</div>
-          </div>
-          <div class="actions">
-            <button class="secondary" onclick="handleChangePassword()">Change Password</button>
-            <button class="secondary" onclick="exportCurrentView()">Download CSV</button>
-            <button class="danger" onclick="handleLogout()">Logout</button>
-          </div>
-        </div>
         ${state.message ? `<div class="success">${state.message}</div>` : ""}
         ${state.error ? `<div class="error">${state.error}</div>` : ""}
         ${state.loading.active ? renderTimedLoading(loadingTitle, "Loading module data.") : activeRenderer()}
+        <div class="page-footer">
+          <button class="danger" onclick="handleLogout()">Logout</button>
+        </div>
       </main>
+      ${renderActionOverlay()}
+      ${renderSecretPrompt()}
     </div>
   `;
 }
@@ -1141,7 +1608,43 @@ function render() {
 }
 
 function bindStudentClassFee() {
-  return;
+  if (state.studentModalOpen) {
+    handleStudentClassChange();
+  }
+}
+
+function openStudentModal() {
+  state.studentModalOpen = true;
+  render();
+}
+
+function closeStudentModal() {
+  state.studentModalOpen = false;
+  render();
+}
+
+function handleStudentClassChange() {
+  const classSelect = qs("#student-class");
+  const actualFeeInput = qs("#student-actual-fee");
+  const committedFeeInput = qs("#student-committed-fee");
+  const concessionInput = qs("#student-concession");
+  if (!classSelect || !actualFeeInput || !committedFeeInput || !concessionInput) return;
+  const selected = classSelect.options[classSelect.selectedIndex];
+  const actualFee = Number(selected ? selected.dataset.actualFee || 0 : 0);
+  actualFeeInput.value = actualFee;
+  if (!committedFeeInput.value) {
+    committedFeeInput.value = actualFee;
+  }
+  handleStudentCommittedFeeChange();
+}
+
+function handleStudentCommittedFeeChange() {
+  const actualFee = Number(qs("#student-actual-fee") ? qs("#student-actual-fee").value || 0 : 0);
+  const committedFee = Number(qs("#student-committed-fee") ? qs("#student-committed-fee").value || 0 : 0);
+  const concession = Math.max(0, actualFee - committedFee);
+  if (qs("#student-concession")) {
+    qs("#student-concession").value = concession;
+  }
 }
 
 async function handleLogin() {
@@ -1189,8 +1692,20 @@ async function handleLogout() {
   render();
 }
 
+function toggleMobileMenu() {
+  state.mobileMenuOpen = !state.mobileMenuOpen;
+  render();
+}
+
+function closeMobileMenu() {
+  if (!state.mobileMenuOpen) return;
+  state.mobileMenuOpen = false;
+  render();
+}
+
 async function switchView(view) {
   try {
+    state.mobileMenuOpen = false;
     await loadViewData(view);
   } catch (error) {
     setMessage(error.message, true);
@@ -1206,23 +1721,27 @@ function toggleModeFields() {
 
 async function handleAddStudent() {
   try {
-    const feeAssignments = Array.from(document.querySelectorAll(".student-fee-head"))
-      .map(input => ({
-        head: input.dataset.head,
-        amount: Number(input.value || 0)
-      }))
-      .filter(item => item.amount > 0);
-    await api("addStudent", {
-      studentName: qs("#student-name").value.trim(),
-      classId: qs("#student-class").value,
-      mobileNumber: qs("#student-mobile").value.trim(),
-      feeAssignments,
-      status: qs("#student-status").value,
-      joinedDate: qs("#student-joined").value
+    await runAction("Saving student", async () => {
+      const feeAssignments = Array.from(document.querySelectorAll(".student-fee-head"))
+        .map(input => ({
+          head: input.dataset.head,
+          amount: Number(input.value || 0)
+        }))
+        .filter(item => item.amount > 0);
+      await api("addStudent", {
+        studentName: qs("#student-name").value.trim(),
+        classId: qs("#student-class").value,
+        mobileNumber: qs("#student-mobile").value.trim(),
+        committedSchoolFee: Number(qs("#student-committed-fee") ? qs("#student-committed-fee").value || 0 : 0),
+        feeAssignments,
+        status: qs("#student-status").value,
+        joinedDate: qs("#student-joined").value
+      });
+      state.students = await api("listStudents");
+      markFresh(["students"]);
+      markStale(["dashboard", "dueReport", "analytics", "finances", "setup"]);
     });
-    state.students = await api("listStudents");
-    markFresh(["students"]);
-    markStale(["dashboard", "dueReport", "analytics", "finances", "setup"]);
+    state.studentModalOpen = false;
     setMessage("Student added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1242,17 +1761,19 @@ async function handleToggleStudentStatus(studentId, currentStatus) {
   const reason = prompt(currentStatus === "Active" ? "Reason for inactivation" : "Reason for reactivation");
   if (!reason) return;
   try {
-    await api("setStudentStatus", {
-      studentId,
-      status: currentStatus === "Active" ? "Inactive" : "Active",
-      reason
+    await runAction("Updating student status", async () => {
+      await api("setStudentStatus", {
+        studentId,
+        status: currentStatus === "Active" ? "Inactive" : "Active",
+        reason
+      });
+      state.students = await api("listStudents");
+      markFresh(["students"]);
+      markStale(["dashboard", "dueReport", "analytics", "finances"]);
+      if (state.ledger && state.ledger.student["Student ID"] === studentId) {
+        state.ledger = await api("getStudentLedger", { studentId });
+      }
     });
-    state.students = await api("listStudents");
-    markFresh(["students"]);
-    markStale(["dashboard", "dueReport", "analytics", "finances"]);
-    if (state.ledger && state.ledger.student["Student ID"] === studentId) {
-      state.ledger = await api("getStudentLedger", { studentId });
-    }
     setMessage("Student status updated");
   } catch (error) {
     setMessage(error.message, true);
@@ -1260,20 +1781,44 @@ async function handleToggleStudentStatus(studentId, currentStatus) {
 }
 
 async function handleDeleteStudent(studentId) {
-  const deleteCode = prompt("Type DELETE to permanently delete this child");
+  const deleteCode = await requestSecretCode("Delete Child", "Enter the password to permanently remove this child.");
   if (!deleteCode) return;
   try {
-    await api("deleteStudent", { studentId, deleteCode: deleteCode.trim() });
-    state.students = await api("listStudents");
-    markFresh(["students"]);
-    markStale(["dashboard", "dueReport", "analytics", "finances", "logs"]);
-    if (state.ledger && state.ledger.student["Student ID"] === studentId) {
-      state.ledger = null;
-    }
+    await runAction("Deleting student", async () => {
+      await api("deleteStudent", { studentId, deleteCode: deleteCode.trim() });
+      state.students = await api("listStudents");
+      markFresh(["students"]);
+      markStale(["dashboard", "dueReport", "analytics", "finances", "logs"]);
+      if (state.ledger && state.ledger.student["Student ID"] === studentId) {
+        state.ledger = null;
+      }
+    });
     setMessage("Student permanently deleted");
   } catch (error) {
     setMessage(error.message, true);
   }
+}
+
+function handleStudentFilters() {
+  state.studentSearch = qs("#student-search") ? qs("#student-search").value : "";
+  state.studentClassFilter = qs("#student-class-filter") ? qs("#student-class-filter").value : "";
+  state.studentStatusFilter = qs("#student-status-filter") ? qs("#student-status-filter").value : "";
+  render();
+}
+
+async function resolveDeleteAction(entityLabel) {
+  const archiveReason = prompt(`Enter archive reason for ${entityLabel}. Leave blank if you want permanent delete.`);
+  if (archiveReason === null) {
+    return null;
+  }
+  if (archiveReason.trim()) {
+    return { mode: "archive", reason: archiveReason.trim() };
+  }
+  const deleteCode = await requestSecretCode("Permanent Delete", `Enter the password to permanently remove ${entityLabel}.`);
+  if (!deleteCode) {
+    return null;
+  }
+  return { mode: "delete", deleteCode: deleteCode.trim() };
 }
 
 function handleStartReassign(studentId) {
@@ -1310,17 +1855,19 @@ async function handleSubmitReassign() {
     return;
   }
   try {
-    await api("reassignFees", {
-      studentId: state.reassignDraft.studentId,
-      feeHead,
-      newAmount,
-      reason
+    await runAction("Reassigning fee head", async () => {
+      await api("reassignFees", {
+        studentId: state.reassignDraft.studentId,
+        feeHead,
+        newAmount,
+        reason
+      });
+      state.students = await api("listStudents");
+      markFresh(["students"]);
+      markStale(["dashboard", "dueReport", "analytics", "finances"]);
+      state.ledger = await api("getStudentLedger", { studentId: state.reassignDraft.studentId });
+      state.reassignDraft = null;
     });
-    state.students = await api("listStudents");
-    markFresh(["students"]);
-    markStale(["dashboard", "dueReport", "analytics", "finances"]);
-    state.ledger = await api("getStudentLedger", { studentId: state.reassignDraft.studentId });
-    state.reassignDraft = null;
     setMessage("Fee reassigned");
   } catch (error) {
     setMessage(error.message, true);
@@ -1329,40 +1876,74 @@ async function handleSubmitReassign() {
 
 async function handleCollectFees() {
   try {
-    const selectedStudent = qs("#collect-student");
-    if (!selectedStudent || !selectedStudent.value) {
+    if (!state.collectStudentId) {
       throw new Error("Select a student before collecting fees");
     }
+    const selectedHead = qs("#collect-head") ? qs("#collect-head").value : "";
+    const amount = Number(qs("#collect-amount").value || 0);
+    const headSummary = summarizeCollectHeads(state.collectLedger);
+    const selectedHeadGroup = headSummary.find(item => item.head === selectedHead);
+    if (!selectedHeadGroup) {
+      throw new Error("Select a fee head before creating receipt");
+    }
+    if (amount <= 0) {
+      throw new Error("Enter a valid amount");
+    }
+    if (amount > selectedHeadGroup.remaining) {
+      throw new Error("Amount cannot exceed the selected head due amount");
+    }
     const payload = {
-      studentId: selectedStudent.value,
+      studentId: state.collectStudentId,
       paymentDate: qs("#collect-date").value,
-      amount: Number(qs("#collect-amount").value),
+      amount: amount,
       paymentMode: qs("#collect-mode").value,
       upiReference: qs("#collect-upi-ref")?.value || "",
-      upiReceivedIn: qs("#collect-upi-in")?.value || ""
+      upiReceivedIn: qs("#collect-upi-in")?.value || "",
+      allocations: buildAllocationsForHead(selectedHeadGroup.instalments, amount)
     };
-    const result = await api("collectFees", payload);
-    state.receipts = await api("listReceipts");
-    state.students = await api("listStudents");
-    markFresh(["receipts", "students"]);
-    markStale(["dashboard", "dueReport", "analytics", "finances", "partners", "logs"]);
+    let result;
+    await runAction("Creating receipt", async () => {
+      result = await api("collectFees", payload);
+      state.receipts = await api("listReceipts");
+      state.students = await api("listStudents");
+      state.collectLedger = await api("getStudentLedger", { studentId: state.collectStudentId });
+      markFresh(["receipts", "students"]);
+      markStale(["dashboard", "dueReport", "analytics", "finances", "partners", "logs"]);
+    });
     setMessage(`Receipt created: ${result.receiptNumber}`);
+    await handlePrintReceipt(result.receiptId);
   } catch (error) {
     setMessage(error.message, true);
   }
+}
+
+function buildAllocationsForHead(instalments, amount) {
+  let remaining = Number(amount || 0);
+  return instalments
+    .slice()
+    .sort((a, b) => String(a["Due Date"]).localeCompare(String(b["Due Date"])))
+    .map(item => {
+      const available = Number(item["Remaining Amount"] || 0);
+      const allocated = Math.min(remaining, available);
+      remaining -= allocated;
+      return allocated > 0 ? { instalmentId: item["Instalment ID"], amount: allocated } : null;
+    })
+    .filter(Boolean);
 }
 
 async function handleCancelReceipt(receiptId) {
   const reason = prompt("Cancellation reason");
   if (!reason) return;
   try {
-    await api("cancelReceipt", { receiptId, reason });
-    state.receipts = await api("listReceipts");
-    markFresh(["receipts"]);
-    markStale(["dashboard", "students", "dueReport", "analytics", "finances", "partners", "logs"]);
-    if (state.selectedReceipt && state.selectedReceipt.receipt["Receipt ID"] === receiptId) {
-      state.selectedReceipt = await api("getReceipt", { receiptId });
-    }
+    await runAction("Cancelling receipt", async () => {
+      await api("cancelReceipt", { receiptId, reason });
+      state.receipts = await api("listReceipts");
+      markFresh(["receipts"]);
+      markStale(["dashboard", "students", "dueReport", "analytics", "finances", "partners", "logs"]);
+      if (state.selectedReceipt && state.selectedReceipt.receipt["Receipt ID"] === receiptId) {
+        state.selectedReceipt = await api("getReceipt", { receiptId });
+      }
+    });
     setMessage("Receipt cancelled");
   } catch (error) {
     setMessage(error.message, true);
@@ -1415,20 +1996,22 @@ async function handlePrintReceipt(receiptId) {
 
 async function handleAddExpense() {
   try {
-    await api("addExpense", {
-      date: qs("#expense-date").value,
-      category: qs("#expense-category").value,
-      description: qs("#expense-description").value.trim(),
-      amount: Number(qs("#expense-amount").value),
-      status: qs("#expense-status").value,
-      paymentMode: qs("#expense-mode").value,
-      paidBy: qs("#expense-paid-by").value.trim(),
-      referenceNumber: qs("#expense-ref").value.trim(),
-      remarks: qs("#expense-remarks").value.trim()
+    await runAction("Saving expense", async () => {
+      await api("addExpense", {
+        date: qs("#expense-date").value,
+        category: qs("#expense-category").value,
+        description: qs("#expense-description").value.trim(),
+        amount: Number(qs("#expense-amount").value),
+        status: qs("#expense-status").value,
+        paymentMode: qs("#expense-mode").value,
+        paidBy: qs("#expense-paid-by").value.trim(),
+        referenceNumber: qs("#expense-ref").value.trim(),
+        remarks: qs("#expense-remarks").value.trim()
+      });
+      state.expenses = await api("listExpenses");
+      markFresh(["expenses"]);
+      markStale(["finances", "partners", "logs"]);
     });
-    state.expenses = await api("listExpenses");
-    markFresh(["expenses"]);
-    markStale(["finances", "partners", "logs"]);
     setMessage("Expense saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1439,10 +2022,12 @@ async function handleArchiveExpense(expenseId) {
   const reason = prompt("Archive reason");
   if (!reason) return;
   try {
-    await api("archiveExpense", { expenseId, reason });
-    state.expenses = await api("listExpenses");
-    markFresh(["expenses"]);
-    markStale(["finances", "partners", "logs"]);
+    await runAction("Archiving expense", async () => {
+      await api("archiveExpense", { expenseId, reason });
+      state.expenses = await api("listExpenses");
+      markFresh(["expenses"]);
+      markStale(["finances", "partners", "logs"]);
+    });
     setMessage("Expense archived");
   } catch (error) {
     setMessage(error.message, true);
@@ -1451,18 +2036,20 @@ async function handleArchiveExpense(expenseId) {
 
 async function handleCreateHandover() {
   try {
-    await api("createCashHandover", {
-      recipient: qs("#handover-recipient").value.trim(),
-      handoverDate: qs("#handover-date").value,
-      remarks: qs("#handover-remarks").value.trim(),
-      allocations: [{
-        receiptId: qs("#handover-receipt").value,
-        amount: Number(qs("#handover-amount").value)
-      }]
+    await runAction("Saving cash handover", async () => {
+      await api("createCashHandover", {
+        recipient: qs("#handover-recipient").value.trim(),
+        handoverDate: qs("#handover-date").value,
+        remarks: qs("#handover-remarks").value.trim(),
+        allocations: [{
+          receiptId: qs("#handover-receipt").value,
+          amount: Number(qs("#handover-amount").value)
+        }]
+      });
+      state.receipts = await api("listReceipts");
+      markFresh(["receipts"]);
+      markStale(["partners", "logs"]);
     });
-    state.receipts = await api("listReceipts");
-    markFresh(["receipts"]);
-    markStale(["partners", "logs"]);
     setMessage("Cash handover saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1471,11 +2058,13 @@ async function handleCreateHandover() {
 
 async function handleSaveSettings() {
   try {
-    await api("saveBasicSettings", { schoolName: qs("#setup-school-name").value.trim() });
-    await api("setAcademicYear", { academicYear: qs("#setup-year").value.trim() });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs"]);
+    await runAction("Saving settings", async () => {
+      await api("saveBasicSettings", { schoolName: qs("#setup-school-name").value.trim() });
+      await api("setAcademicYear", { academicYear: qs("#setup-year").value.trim() });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["dashboard", "students", "receipts", "expenses", "dueReport", "analytics", "finances", "partners", "logs"]);
+    });
     setMessage("Settings updated");
   } catch (error) {
     setMessage(error.message, true);
@@ -1484,14 +2073,17 @@ async function handleSaveSettings() {
 
 async function handleSaveClass() {
   try {
-    await api("saveClassSetup", {
-      classes: [{
-        className: qs("#setup-class-name").value.trim()
-      }]
+    await runAction("Saving class", async () => {
+      await api("saveClassSetup", {
+        classes: [{
+          className: qs("#setup-class-name").value.trim(),
+          actualSchoolFee: Number(qs("#setup-class-actual-fee").value || 0)
+        }]
+      });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dashboard"]);
     });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dashboard"]);
     setMessage("Class added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1499,18 +2091,20 @@ async function handleSaveClass() {
 }
 
 async function handleDeleteClass(classId) {
-  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  const action = await resolveDeleteAction("this class");
   if (!action) return;
   try {
-    if (action.trim() === "DELETE") {
-      await api("deleteClass", { classId });
-    } else {
-      await api("archiveClass", { classId, reason: action.trim() });
-    }
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dashboard"]);
-    setMessage(action.trim() === "DELETE" ? "Class permanently deleted" : "Class archived");
+    await runAction(action.mode === "delete" ? "Deleting class" : "Archiving class", async () => {
+      if (action.mode === "delete") {
+        await api("deleteClass", { classId, deleteCode: action.deleteCode });
+      } else {
+        await api("archiveClass", { classId, reason: action.reason });
+      }
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dashboard"]);
+    });
+    setMessage(action.mode === "delete" ? "Class permanently deleted" : "Class archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1518,12 +2112,14 @@ async function handleDeleteClass(classId) {
 
 async function handleSaveFeeHead() {
   try {
-    await api("saveFeeHeads", {
-      heads: [qs("#setup-fee-head-name").value.trim()]
+    await runAction("Saving fee head", async () => {
+      await api("saveFeeHeads", {
+        heads: [qs("#setup-fee-head-name").value.trim()]
+      });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard"]);
     });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard"]);
     setMessage("Fee head added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1539,10 +2135,12 @@ async function handleEditFeeHead(headId, currentName) {
   const headName = prompt("Fee head name", currentName);
   if (!headName || headName.trim() === currentName) return;
   try {
-    await api("updateFeeHead", { headId, headName: headName.trim() });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard", "analytics"]);
+    await runAction("Updating fee head", async () => {
+      await api("updateFeeHead", { headId, headName: headName.trim() });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard", "analytics"]);
+    });
     setMessage("Fee head updated");
   } catch (error) {
     setMessage(error.message, true);
@@ -1550,18 +2148,20 @@ async function handleEditFeeHead(headId, currentName) {
 }
 
 async function handleDeleteFeeHead(headId) {
-  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  const action = await resolveDeleteAction("this fee head");
   if (!action) return;
   try {
-    if (action.trim() === "DELETE") {
-      await api("deleteFeeHead", { headId });
-    } else {
-      await api("archiveFeeHead", { headId, reason: action.trim() });
-    }
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard", "analytics"]);
-    setMessage(action.trim() === "DELETE" ? "Fee head permanently deleted" : "Fee head archived");
+    await runAction(action.mode === "delete" ? "Deleting fee head" : "Archiving fee head", async () => {
+      if (action.mode === "delete") {
+        await api("deleteFeeHead", { headId, deleteCode: action.deleteCode });
+      } else {
+        await api("archiveFeeHead", { headId, reason: action.reason });
+      }
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard", "analytics"]);
+    });
+    setMessage(action.mode === "delete" ? "Fee head permanently deleted" : "Fee head archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1573,20 +2173,23 @@ function handleScheduleHeadChange() {
 
 function handleCollectStudentSearch() {
   state.collectSearch = qs("#collect-student-search") ? qs("#collect-student-search").value : "";
-  const activeStudents = state.students.filter(item => item.status === "Active");
-  const searchText = String(state.collectSearch || "").trim().toLowerCase();
-  const filteredStudents = activeStudents.filter(item => {
-    if (!searchText) return true;
-    return String(item.studentName || "").toLowerCase().includes(searchText) ||
-      String(item.mobileNumber || "").toLowerCase().includes(searchText) ||
-      String(item.className || "").toLowerCase().includes(searchText);
-  });
-  state.collectStudentId = filteredStudents.length ? filteredStudents[0].studentId : "";
   render();
 }
 
 function handleCollectStudentSelect() {
   state.collectStudentId = qs("#collect-student") ? qs("#collect-student").value : "";
+}
+
+async function handleSelectCollectStudent(studentId) {
+  try {
+    state.collectStudentId = studentId;
+    await runAction("Loading student dues", async () => {
+      state.collectLedger = await api("getStudentLedger", { studentId });
+    });
+    render();
+  } catch (error) {
+    setMessage(error.message, true);
+  }
 }
 
 function handleScheduleCountChange() {
@@ -1612,21 +2215,23 @@ async function handleSaveSchedule() {
     if (!dates.length) {
       throw new Error("Add at least one due date");
     }
-    await api("saveSchedules", {
-      schedules: dates.map(dueDate => ({
+    await runAction("Saving schedule", async () => {
+      await api("saveSchedules", {
+        schedules: dates.map(dueDate => ({
+          feeHead,
+          dueDate,
+          instalmentCount: 1
+        }))
+      });
+      state.scheduleDraft = {
         feeHead,
-        dueDate,
-        instalmentCount: 1
-      }))
+        instalmentCount: 1,
+        dates: [""]
+      };
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard"]);
     });
-    state.scheduleDraft = {
-      feeHead,
-      instalmentCount: 1,
-      dates: [""]
-    };
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard"]);
     setMessage("Schedule added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1639,14 +2244,16 @@ async function handleEditSchedule(scheduleId, currentHead, currentDate) {
   const dueDate = prompt("Due date (YYYY-MM-DD)", currentDate);
   if (!dueDate) return;
   try {
-    await api("updateSchedule", {
-      scheduleId,
-      feeHead: feeHead.trim(),
-      dueDate: dueDate.trim()
+    await runAction("Updating schedule", async () => {
+      await api("updateSchedule", {
+        scheduleId,
+        feeHead: feeHead.trim(),
+        dueDate: dueDate.trim()
+      });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard"]);
     });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard"]);
     setMessage("Schedule updated");
   } catch (error) {
     setMessage(error.message, true);
@@ -1654,18 +2261,20 @@ async function handleEditSchedule(scheduleId, currentHead, currentDate) {
 }
 
 async function handleDeleteSchedule(scheduleId) {
-  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  const action = await resolveDeleteAction("this schedule");
   if (!action) return;
   try {
-    if (action.trim() === "DELETE") {
-      await api("deleteSchedule", { scheduleId });
-    } else {
-      await api("archiveSchedule", { scheduleId, reason: action.trim() });
-    }
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["students", "dueReport", "dashboard"]);
-    setMessage(action.trim() === "DELETE" ? "Schedule permanently deleted" : "Schedule archived");
+    await runAction(action.mode === "delete" ? "Deleting schedule" : "Archiving schedule", async () => {
+      if (action.mode === "delete") {
+        await api("deleteSchedule", { scheduleId, deleteCode: action.deleteCode });
+      } else {
+        await api("archiveSchedule", { scheduleId, reason: action.reason });
+      }
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["students", "dueReport", "dashboard"]);
+    });
+    setMessage(action.mode === "delete" ? "Schedule permanently deleted" : "Schedule archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1673,11 +2282,13 @@ async function handleDeleteSchedule(scheduleId) {
 
 async function handleSaveCategory() {
   try {
-    await api("saveExpenseCategories", {
-      categories: [qs("#setup-category-name").value.trim()]
+    await runAction("Saving category", async () => {
+      await api("saveExpenseCategories", {
+        categories: [qs("#setup-category-name").value.trim()]
+      });
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
     });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
     setMessage("Category added");
   } catch (error) {
     setMessage(error.message, true);
@@ -1685,17 +2296,19 @@ async function handleSaveCategory() {
 }
 
 async function handleDeleteCategory(categoryId) {
-  const action = prompt("Type DELETE for permanent delete. Otherwise type archive reason.");
+  const action = await resolveDeleteAction("this category");
   if (!action) return;
   try {
-    if (action.trim() === "DELETE") {
-      await api("deleteExpenseCategory", { categoryId });
-    } else {
-      await api("archiveExpenseCategory", { categoryId, reason: action.trim() });
-    }
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    setMessage(action.trim() === "DELETE" ? "Category permanently deleted" : "Category archived");
+    await runAction(action.mode === "delete" ? "Deleting category" : "Archiving category", async () => {
+      if (action.mode === "delete") {
+        await api("deleteExpenseCategory", { categoryId, deleteCode: action.deleteCode });
+      } else {
+        await api("archiveExpenseCategory", { categoryId, reason: action.reason });
+      }
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+    });
+    setMessage(action.mode === "delete" ? "Category permanently deleted" : "Category archived");
   } catch (error) {
     setMessage(error.message, true);
   }
@@ -1703,23 +2316,25 @@ async function handleDeleteCategory(categoryId) {
 
 async function handleSavePartner() {
   try {
-    const partners = qs("#setup-partner-lines").value
-      .split("\n")
-      .map(line => line.trim())
-      .filter(Boolean)
-      .map(line => {
-        const parts = line.split(",");
-        return {
-          partnerName: (parts[0] || "").trim(),
-          sharePercentage: Number((parts[1] || "").trim())
-        };
+    await runAction("Saving partner set", async () => {
+      const partners = qs("#setup-partner-lines").value
+        .split("\n")
+        .map(line => line.trim())
+        .filter(Boolean)
+        .map(line => {
+          const parts = line.split(",");
+          return {
+            partnerName: (parts[0] || "").trim(),
+            sharePercentage: Number((parts[1] || "").trim())
+          };
+        });
+      await api("savePartners", {
+        partners
       });
-    await api("savePartners", {
-      partners
+      setBootstrap(await api("getBootstrap"));
+      markFresh(["setup"]);
+      markStale(["partners", "finances", "logs"]);
     });
-    setBootstrap(await api("getBootstrap"));
-    markFresh(["setup"]);
-    markStale(["partners", "finances", "logs"]);
     setMessage("Partner set saved");
   } catch (error) {
     setMessage(error.message, true);
@@ -1795,7 +2410,9 @@ async function handleChangePassword() {
   const newPassword = prompt("New password");
   if (!newPassword) return;
   try {
-    await api("changePassword", { currentPassword, newPassword });
+    await runAction("Changing password", async () => {
+      await api("changePassword", { currentPassword, newPassword });
+    });
     setMessage("Password changed");
   } catch (error) {
     setMessage(error.message, true);

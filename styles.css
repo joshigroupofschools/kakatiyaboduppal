@@ -48,20 +48,29 @@ body {
 
 .shell {
   display: grid;
-  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-columns: 1fr;
   min-height: 100vh;
   width: 100%;
 }
 
 .sidebar {
-  position: sticky;
+  position: fixed;
   top: 0;
-  align-self: start;
+  right: 0;
+  bottom: 0;
+  width: min(320px, 86vw);
   min-height: 100vh;
   padding: 20px 16px;
   color: #e2e8f0;
   background: linear-gradient(180deg, var(--sidebar-1), var(--sidebar-2));
-  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: 0;
+  z-index: 1100;
+  transform: translateX(100%);
+  transition: transform 0.22s ease;
+}
+
+.sidebar.open {
+  transform: translateX(0);
 }
 
 .sidebar-top {
@@ -155,6 +164,94 @@ button.danger {
   min-width: 0;
   padding: 20px;
   width: 100%;
+}
+
+.mobile-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: rgba(248, 250, 252, 0.94);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+  backdrop-filter: blur(10px);
+}
+
+.menu-backdrop {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  border: 0;
+  background: rgba(15, 23, 42, 0.36);
+}
+
+.student-card-list {
+  display: none;
+}
+
+.desktop-only {
+  display: block;
+}
+
+.page-footer {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.page-footer button {
+  min-width: 160px;
+}
+
+.section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+}
+
+.mobile-title {
+  display: grid;
+  gap: 2px;
+}
+
+.mobile-title strong {
+  font-family: var(--font-display);
+  font-size: 1rem;
+}
+
+.mobile-title span {
+  color: var(--ink-soft);
+  font-size: 0.86rem;
+}
+
+.menu-toggle {
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.panel-wide {
+  grid-column: 1 / -1;
+}
+
+.collect-student-list {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.student-modal-card {
+  width: min(860px, calc(100vw - 32px));
+}
+
+.modal-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
 }
 
 .toolbar {
@@ -462,6 +559,54 @@ tbody tr:hover {
   gap: 8px;
 }
 
+.student-card {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff, #f8fbff);
+}
+
+.student-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.student-name {
+  font-family: var(--font-display);
+  font-size: 1.02rem;
+  font-weight: 700;
+}
+
+.student-card-stats {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.student-card-stats div {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+}
+
+.student-card-stats span {
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.student-card-stats strong {
+  font-size: 0.98rem;
+  color: var(--ink);
+}
+
 .detail-panel {
   margin-top: 18px;
   padding-top: 18px;
@@ -514,6 +659,40 @@ tbody tr:hover {
   color: #065f46;
   background: rgba(209, 250, 229, 0.85);
   border-color: rgba(52, 211, 153, 0.22);
+}
+
+.action-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, 0.28);
+  backdrop-filter: blur(3px);
+}
+
+.action-overlay-card {
+  width: min(420px, calc(100vw - 32px));
+  display: grid;
+  gap: 12px;
+  padding: 24px 22px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.26);
+  text-align: center;
+}
+
+.action-overlay-title {
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.secret-card {
+  text-align: left;
 }
 
 .slow-load {
@@ -684,35 +863,15 @@ tbody tr:hover {
   color: var(--ink-soft);
 }
 
-@media (max-width: 1200px) {
-  .shell {
-    grid-template-columns: 250px minmax(0, 1fr);
-  }
-}
-
 @media (max-width: 1024px) {
-  .shell {
-    grid-template-columns: 1fr;
-  }
-
   .sidebar {
-    position: relative;
-    min-height: auto;
+    min-height: 100vh;
     padding: 18px 14px;
-    border-right: 0;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.08);
   }
 
   .menu {
-    grid-auto-flow: column;
-    grid-auto-columns: minmax(148px, 1fr);
-    overflow-x: auto;
-    padding-bottom: 6px;
-  }
-
-  .menu button {
-    min-height: 46px;
-    white-space: nowrap;
+    gap: 8px;
+    margin-top: 16px;
   }
 
   .content {
@@ -769,19 +928,6 @@ tbody tr:hover {
     padding: 14px;
   }
 
-  .toolbar {
-    align-items: stretch;
-  }
-
-  .toolbar .actions {
-    width: 100%;
-    justify-content: stretch;
-  }
-
-  .toolbar .actions button {
-    flex: 1 1 140px;
-  }
-
   .grid,
   .cards,
   .form-grid {
@@ -796,6 +942,8 @@ tbody tr:hover {
   .setup-nav {
     display: flex;
     grid-template-columns: none;
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 
   .panel,
@@ -846,9 +994,23 @@ tbody tr:hover {
     width: 100%;
   }
 
+  .desktop-only {
+    display: none;
+  }
+
+  .student-card-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .table-wrap {
+    overflow-x: hidden;
+  }
+
   table {
     min-width: 0;
     width: 100%;
+    table-layout: fixed;
   }
 }
 
@@ -862,7 +1024,6 @@ tbody tr:hover {
   }
 
   .menu {
-    grid-auto-columns: minmax(132px, 1fr);
     gap: 6px;
   }
 
