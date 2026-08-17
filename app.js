@@ -63,7 +63,7 @@ const state = {
   collectStudentId: "",
   studentSearch: "",
   studentClassFilter: "",
-  studentStatusFilter: "",
+  studentStatusFilter: "Active",
   selectedReceipt: null,
   secretPrompt: null,
   message: "",
@@ -109,6 +109,18 @@ function formatElapsed(ms) {
   const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
   const seconds = String(totalSeconds % 60).padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function formatDateOnly(value) {
+  if (!value) return "";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return String(value).slice(0, 10);
+  }
+  const year = parsed.getFullYear();
+  const month = String(parsed.getMonth() + 1).padStart(2, "0");
+  const day = String(parsed.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function startLoading(view) {
@@ -392,8 +404,17 @@ function renderLogin() {
 }
 
 function renderCards(cards) {
+  function cardTone(label) {
+    var text = String(label || "").toLowerCase();
+    if (text.indexOf("cash") !== -1) return "card-cash";
+    if (text.indexOf("upi") !== -1) return "card-upi";
+    if (text.indexOf("due") !== -1) return "card-due";
+    if (text.indexOf("student") !== -1) return "card-students";
+    if (text.indexOf("collected") !== -1) return "card-collected";
+    return "card-neutral";
+  }
   return `<div class="cards">${cards.map(card => `
-    <div class="card">
+    <div class="card ${cardTone(card.label)}">
       <div class="muted">${card.label}</div>
       <div class="value">${formatValue(card.value, card.kind || (typeof card.value === "number" ? "currency" : "text"))}</div>
     </div>`).join("")}
@@ -488,24 +509,46 @@ function submitSecretPrompt() {
 
 function renderDashboard() {
   if (!state.dashboard) return `<div class="panel">Loading...</div>`;
+  const statCards = (state.dashboard.cards || []).map(card => ({
+    label: card.label,
+    value: card.value,
+    kind: String(card.label || "").includes("Students") ? "number" : "currency"
+  }));
   return `
-    <div class="grid">
-      ${renderCards(state.dashboard.cards.map(card => ({
-        label: card.label,
-        value: card.value,
-        kind: card.label.includes("Students") ? "number" : "currency"
-      })))}
-      <div class="panel panel-wide">
-        <h3>Recent Receipts</h3>
+    <div class="dashboard-shell stack">
+      <div class="hero-banner">
+        <div class="hero-copy">
+          <div class="eyebrow">Live Overview</div>
+          <h2>Counter-first school collections.</h2>
+          <p>Keep the payment desk fast, keep financial signals visible, and keep reporting separate from rush-hour operations.</p>
+        </div>
+        <div class="hero-badge">
+          <span>Today</span>
+          <strong>${formatDateOnly(new Date())}</strong>
+        </div>
+      </div>
+      ${renderCards(statCards)}
+      <div class="panel panel-wide dashboard-receipts">
+        <div class="panel-heading">
+          <div>
+            <div class="eyebrow">Collections</div>
+            <h3>Recent Receipts</h3>
+          </div>
+          <div class="pill">${(state.dashboard.recentReceipts || []).length} latest entries</div>
+        </div>
         ${renderTable(
-          ["Receipt No", "Date", "Student", "Mode", "Amount", "Status"],
+          ["Receipt No", "Date", "Student", "Mode", "Amount", "Status", "Action"],
           state.dashboard.recentReceipts.map(item => [
             item["Receipt Number"],
-            item["Receipt Date"],
+            formatDateOnly(item["Receipt Date"]),
             item["Student Name"],
             item["Payment Mode"],
             formatCurrency(item["Amount"]),
-            item["Status"]
+            item["Status"],
+            `<div class="actions-row">
+              <button class="secondary" onclick="handlePrintReceipt('${item["Receipt ID"]}')">Print</button>
+              <button class="secondary" onclick="handleOpenReceipt('${item["Receipt ID"]}')">View</button>
+            </div>`
           ])
         )}
       </div>
@@ -642,7 +685,7 @@ function renderStudents() {
         ${reassignStudent ? `
           <div class="detail-panel stack">
             <h3>Reassign Fee Head</h3>
-            <div class="muted">${reassignStudent.studentName} · ${reassignStudent.className}</div>
+            <div class="muted">${reassignStudent.studentName} ? ${reassignStudent.className}</div>
             <div class="form-grid">
               <label>Fee Head
                 <select id="reassign-fee-head">
@@ -685,14 +728,17 @@ function renderStudentWorkspace() {
     ? state.students.find(item => item.studentId === state.reassignDraft.studentId)
     : null;
   return `
-    <div class="stack">
-      <div class="panel">
-        <div class="section-head">
-          <h3>Student Fee Register</h3>
-          <div class="muted">Filter by class, status, name, or mobile for faster work.</div>
+    <div class="stack student-workspace">
+      <div class="panel student-workspace-panel">
+        <div class="panel-heading">
+          <div class="section-head">
+            <div class="eyebrow">Student Fees Data</div>
+            <h3>Student Register</h3>
+            <div class="muted">Default view shows active students. Search and filters stay compact so the table gets maximum space.</div>
+          </div>
+          <button class="primary add-student-btn" onclick="openStudentModal()">Add Student</button>
         </div>
-        <div class="inline-form">
-          <button class="primary" onclick="openStudentModal()">Add Student</button>
+        <div class="inline-form compact-filters">
           <input id="student-search" value="${state.studentSearch || ""}" oninput="handleStudentFilters()" placeholder="Search by student or mobile" />
           <select id="student-class-filter" onchange="handleStudentFilters()">
             <option value="">All Classes</option>
@@ -711,7 +757,7 @@ function renderStudentWorkspace() {
               <div class="student-card-head">
                 <div>
                   <div class="student-name">${item.studentName}</div>
-                  <div class="muted">${item.className} · ${item.mobileNumber}</div>
+                  <div class="muted">${item.className} • ${item.mobileNumber}</div>
                 </div>
                 <div class="pill">${item.status}</div>
               </div>
@@ -741,7 +787,7 @@ function renderStudentWorkspace() {
               formatCurrency(item.actualSchoolFee),
               formatCurrency(item.committedSchoolFee),
               formatCurrency(item.concession),
-              item.feeHeadSummary || "-",
+              `<div class="fee-head-cell">${item.feeHeadSummary || "-"}</div>`,
               formatCurrency(item.totalAssigned),
               formatCurrency(item.totalPaid),
               formatCurrency(item.overallDue),
@@ -760,7 +806,7 @@ function renderStudentWorkspace() {
       ${reassignStudent ? `
         <div class="panel detail-panel stack">
           <h3>Reassign Fee Head</h3>
-          <div class="muted">${reassignStudent.studentName} · ${reassignStudent.className}</div>
+          <div class="muted">${reassignStudent.studentName} • ${reassignStudent.className}</div>
           <div class="form-grid">
             <label>Fee Head
               <select id="reassign-fee-head">
@@ -833,14 +879,19 @@ function renderStudentModal() {
 function renderLedgerPanel(ledger) {
   const student = ledger.student;
   return `
-    <div class="detail-panel stack">
-      <h3>Ledger: ${student["Student Name"]}</h3>
-      <div class="pill mono">${student["Student ID"]}</div>
+    <div class="panel stack ledger-panel">
+      <div class="panel-heading">
+        <div class="section-head">
+          <div class="eyebrow">Student Ledger</div>
+          <h3>${student["Student Name"]}</h3>
+        </div>
+        <div class="pill mono">${student["Student ID"]}</div>
+      </div>
       ${renderTable(
         ["Head", "Due Date", "Assigned", "Paid", "Remaining", "Status"],
         ledger.instalments.map(item => [
           item["Fee Head"],
-          item["Due Date"],
+          formatDateOnly(item["Due Date"]),
           formatCurrency(item["Assigned Amount"]),
           formatCurrency(item["Paid Amount"]),
           formatCurrency(item["Remaining Amount"]),
@@ -851,7 +902,7 @@ function renderLedgerPanel(ledger) {
         ["Receipt No", "Date", "Amount", "Mode", "Status"],
         ledger.receipts.map(item => [
           item["Receipt Number"],
-          item["Receipt Date"],
+          formatDateOnly(item["Receipt Date"]),
           formatCurrency(item["Amount"]),
           item["Payment Mode"],
           item["Status"]
@@ -933,67 +984,89 @@ function renderCollectFeesFast() {
     `;
   }
   return `
-    <div class="stack">
-      <div class="panel stack">
-        <h3>Collect Fees</h3>
+    <div class="stack collect-shell">
+      <div class="panel stack collect-search-panel">
+        <div class="panel-heading">
+          <div class="section-head">
+            <div class="eyebrow">Collections Desk</div>
+            <h3>Collect Fees</h3>
+            <div class="muted">Search by name or mobile number, select the child, then collect against a specific fee head.</div>
+          </div>
+          <div class="pill">${activeStudents.length} active students</div>
+        </div>
         <label>Search Student Name / Mobile Number
           <input id="collect-student-search" value="${state.collectSearch || ""}" oninput="handleCollectStudentSearch()" placeholder="Search student name or mobile number" />
         </label>
         <div class="collect-student-list">
           ${filteredStudents.slice(0, 12).map(item => `
-            <button class="${state.collectStudentId === item.studentId ? "primary" : "secondary"}" onclick="handleSelectCollectStudent('${item.studentId}')">
-              ${item.studentName} · ${item.className} · ${item.mobileNumber}
+            <button class="student-picker ${state.collectStudentId === item.studentId ? "primary" : "secondary"}" onclick="handleSelectCollectStudent('${item.studentId}')">
+              <span class="student-picker-name">${item.studentName}</span>
+              <span class="student-picker-meta">${item.className} • ${item.mobileNumber}</span>
             </button>
           `).join("") || `<div class="muted">No student matched that search.</div>`}
         </div>
       </div>
       ${selectedStudent ? `
-        <div class="panel stack">
-          <div class="section-head">
-            <h3>${selectedStudent.studentName}</h3>
-            <div class="muted">${selectedStudent.className} · ${selectedStudent.mobileNumber}</div>
+        <div class="grid collect-grid">
+          <div class="panel stack collect-form-panel">
+            <div class="section-head">
+              <div class="eyebrow">Selected Student</div>
+              <h3>${selectedStudent.studentName}</h3>
+              <div class="muted">${selectedStudent.className} • ${selectedStudent.mobileNumber}</div>
+            </div>
+            <div class="collect-head-cards">
+              ${headSummary.map(item => `
+                <div class="collect-head-card">
+                  <span>${item.head}</span>
+                  <strong>${formatCurrency(item.remaining)}</strong>
+                </div>
+              `).join("") || `<div class="collect-head-card"><span>No open heads</span><strong>${formatCurrency(0)}</strong></div>`}
+            </div>
+            <div class="form-grid">
+              <label>Amount<input id="collect-amount" type="number" min="1" /></label>
+              <label>Fee Head
+                <select id="collect-head">
+                  <option value="">Select Head</option>
+                  ${headSummary.map(item => `<option value="${item.head}">${item.head} • Due ${formatCurrency(item.remaining)}</option>`).join("")}
+                </select>
+              </label>
+              <label>Payment Date<input id="collect-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
+              <label>Mode
+                <select id="collect-mode" onchange="toggleModeFields()">
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                </select>
+              </label>
+              <label id="upi-ref-wrap">UPI Ref<input id="collect-upi-ref" /></label>
+              <label id="upi-in-wrap">UPI Received In<input id="collect-upi-in" placeholder="School account or Partner name" /></label>
+            </div>
+            <button class="primary" onclick="handleCollectFees()">Create Receipt</button>
           </div>
-          <div class="form-grid">
-            <label>Amount<input id="collect-amount" type="number" min="1" /></label>
-            <label>Fee Head
-              <select id="collect-head">
-                <option value="">Select Head</option>
-                ${headSummary.map(item => `<option value="${item.head}">${item.head} · Due ${formatCurrency(item.remaining)}</option>`).join("")}
-              </select>
-            </label>
-            <label>Payment Date<input id="collect-date" type="date" value="${new Date().toISOString().slice(0, 10)}" /></label>
-            <label>Mode
-              <select id="collect-mode" onchange="toggleModeFields()">
-                <option value="Cash">Cash</option>
-                <option value="UPI">UPI</option>
-              </select>
-            </label>
-            <label id="upi-ref-wrap">UPI Ref<input id="collect-upi-ref" /></label>
-            <label id="upi-in-wrap">UPI Received In<input id="collect-upi-in" placeholder="School account or Partner name" /></label>
+          <div class="panel stack collect-receipts-panel">
+            <div class="panel-heading">
+              <div class="section-head">
+                <div class="eyebrow">Receipt History</div>
+                <h3>Recent Receipts</h3>
+              </div>
+              <div class="pill">${receiptRows.length} receipts</div>
+            </div>
+            ${receiptRows.length ? renderTable(
+              ["Receipt No", "Date", "Mode", "Amount", "Status", "Action"],
+              receiptRows.map(item => [
+                item["Receipt Number"],
+                formatDateOnly(item["Receipt Date"]),
+                item["Payment Mode"],
+                formatCurrency(item["Amount"]),
+                item["Status"],
+                `<div class="actions-row">
+                  <button class="secondary" onclick="handleOpenReceipt('${item["Receipt ID"]}')">View</button>
+                  <button class="secondary" onclick="handlePrintReceipt('${item["Receipt ID"]}')">Print</button>
+                  ${item["Status"] === "Valid" ? `<button class="danger" onclick="handleCancelReceipt('${item["Receipt ID"]}')">Cancel</button>` : ""}
+                </div>`
+              ])
+            ) : `<div class="muted">No receipts for this student yet.</div>`}
+            ${state.selectedReceipt ? renderReceiptPanel(state.selectedReceipt) : ""}
           </div>
-          <div class="student-card-stats">
-            ${headSummary.map(item => `<div><span>${item.head}</span><strong>${formatCurrency(item.remaining)}</strong></div>`).join("") || `<div><span>No open heads</span><strong>${formatCurrency(0)}</strong></div>`}
-          </div>
-          <button class="primary" onclick="handleCollectFees()">Create Receipt</button>
-        </div>
-        <div class="panel stack">
-          <h3>Receipts</h3>
-          ${receiptRows.length ? renderTable(
-            ["Receipt No", "Date", "Mode", "Amount", "Status", "Action"],
-            receiptRows.map(item => [
-              item["Receipt Number"],
-              item["Receipt Date"],
-              item["Payment Mode"],
-              formatCurrency(item["Amount"]),
-              item["Status"],
-              `<div class="actions-row">
-                <button class="secondary" onclick="handleOpenReceipt('${item["Receipt ID"]}')">View</button>
-                <button class="secondary" onclick="handlePrintReceipt('${item["Receipt ID"]}')">Print</button>
-                ${item["Status"] === "Valid" ? `<button class="danger" onclick="handleCancelReceipt('${item["Receipt ID"]}')">Cancel</button>` : ""}
-              </div>`
-            ])
-          ) : `<div class="muted">No receipts for this student yet.</div>`}
-          ${state.selectedReceipt ? renderReceiptPanel(state.selectedReceipt) : ""}
         </div>
       ` : ""}
     </div>
@@ -1058,14 +1131,19 @@ function renderReceipts() {
 
 function renderReceiptPanel(detail) {
   return `
-    <div class="detail-panel stack">
-      <h3>Receipt Detail</h3>
-      <div class="pill mono">${detail.receipt["Receipt Number"]}</div>
+    <div class="panel stack receipt-detail-panel">
+      <div class="panel-heading">
+        <div class="section-head">
+          <div class="eyebrow">Receipt Detail</div>
+          <h3>${detail.receipt["Student Name"]}</h3>
+        </div>
+        <div class="pill mono">${detail.receipt["Receipt Number"]}</div>
+      </div>
       ${renderTable(
         ["Field", "Value"],
         [
           ["Student", detail.receipt["Student Name"]],
-          ["Date", detail.receipt["Receipt Date"]],
+          ["Date", formatDateOnly(detail.receipt["Receipt Date"])],
           ["Amount", formatCurrency(detail.receipt["Amount"])],
           ["Mode", detail.receipt["Payment Mode"]],
           ["UPI Ref", detail.receipt["UPI Reference"]],
@@ -1087,12 +1165,17 @@ function renderReceiptPanel(detail) {
 }
 
 function renderDueReport() {
+  const dueMode = safe(state, "dueMode", "dueTillDate");
   return `
     <div class="panel">
       <h3>Due Report</h3>
       ${renderReportActions()}
       <div class="inline-form">
         <input id="due-date" type="date" value="${new Date().toISOString().slice(0, 10)}" />
+        <select id="due-mode">
+          <option value="dueTillDate" ${dueMode === "dueTillDate" ? "selected" : ""}>Due Till Date</option>
+          <option value="totalDue" ${dueMode === "totalDue" ? "selected" : ""}>Total Due</option>
+        </select>
         <select id="due-active-only">
           <option value="true">Active Only</option>
           <option value="false">All Students</option>
@@ -1102,7 +1185,7 @@ function renderDueReport() {
         <button class="secondary" onclick="handleFilterDueReport()">Filter</button>
       </div>
       ${renderTable(
-        ["Class", "Student", "Mobile", "Assigned", "Paid", "Overall Due", "Payable", "Due"],
+        ["Class", "Student", "Mobile", "Assigned", "Paid", "Overall Due", dueMode === "totalDue" ? "Total Due" : "Due Till Date"],
         state.dueReport.map(item => [
           item.className,
           item.studentName,
@@ -1110,8 +1193,7 @@ function renderDueReport() {
           formatCurrency(item.totalAssigned),
           formatCurrency(item.totalPaid),
           formatCurrency(item.overallDue),
-          formatCurrency(item.payableAsOfSelectedDate),
-          formatCurrency(item.dueAsOfSelectedDate)
+          formatCurrency(dueMode === "totalDue" ? item.overallDue : item.dueAsOfSelectedDate)
         ])
       )}
     </div>
@@ -1121,6 +1203,7 @@ function renderDueReport() {
 function renderExpenses() {
   const categories = safe(state, "bootstrap.categories", []);
   const role = safe(state, "bootstrap.role", "");
+  const paidByOptions = ["School Cash"].concat(safe(state, "bootstrap.partners", []).map(item => item["Partner Name"]));
   return `
     <div class="split">
       <div class="panel">
@@ -1145,7 +1228,11 @@ function renderExpenses() {
               <option value="Bank">Bank</option>
             </select>
           </label>
-          <label>Paid By<input id="expense-paid-by" placeholder="School Cash / School Bank / Partner" /></label>
+          <label>Paid By
+            <select id="expense-paid-by">
+              ${paidByOptions.map(item => `<option value="${item}">${item}</option>`).join("")}
+            </select>
+          </label>
           <label>Reference<input id="expense-ref" /></label>
           <label>Description / Remarks<textarea id="expense-remarks"></textarea></label>
         </div>
@@ -1566,34 +1653,57 @@ function renderMain() {
   };
   const activeRenderer = contentMap[state.view] || renderDashboard;
   const loadingTitle = String(state.view || "module").replace(/-/g, " ");
+  const menuIconMap = {
+    dashboard: "◫",
+    students: "◧",
+    collect: "₹",
+    receipts: "🧾",
+    "due-report": "◩",
+    expenses: "◭",
+    handover: "⇄",
+    analytics: "◬",
+    finances: "◪",
+    partners: "◨",
+    logs: "≣",
+    setup: "⚙"
+  };
   return `
     <div class="shell">
       <div class="mobile-topbar">
-        <div class="mobile-title">
+        <div class="mobile-title shell-title">
           <strong>${schoolName}</strong>
           <span>${currentViewLabel}</span>
         </div>
-        <button class="menu-toggle" onclick="toggleMobileMenu()">Menu</button>
+        <div class="topbar-actions">
+          <button class="icon-button logout-icon" onclick="handleLogout()" title="Logout" aria-label="Logout">&#9099;</button>
+          <button class="icon-button menu-toggle" onclick="toggleMobileMenu()" title="Menu" aria-label="Menu">&#9776;</button>
+        </div>
       </div>
       ${state.mobileMenuOpen ? `<button class="menu-backdrop" onclick="closeMobileMenu()" aria-label="Close menu"></button>` : ""}
       <aside class="sidebar ${state.mobileMenuOpen ? "open" : ""}">
         <div class="sidebar-top">
           <div class="eyebrow">Academic Operations</div>
           <div class="brand">${schoolName}</div>
-          <div class="subtle">${academicYear}</div>
-          <div class="user-chip">${userId} · ${role}</div>
+          <div class="subtle">${currentViewLabel}</div>
+          <div class="user-chip">${userId} • ${role}</div>
         </div>
         <div class="menu">
-          ${visibleMenu().map(([key, label]) => `<button class="${state.view === key ? "active" : ""}" onclick="switchView('${key}')">${label}</button>`).join("")}
+          ${visibleMenu().map(([key, label]) => `
+            <button class="${state.view === key ? "active" : ""}" onclick="switchView('${key}')">
+              <span class="menu-icon">${menuIconMap[key] || "•"}</span>
+              <span>${label}</span>
+            </button>
+          `).join("")}
+        </div>
+        <div class="sidebar-footer">
+          <div class="sidebar-meta">${academicYear || "Current academic year"}</div>
+          <button class="sidebar-logout" onclick="handleLogout()">Logout</button>
         </div>
       </aside>
       <main class="content">
         ${state.message ? `<div class="success">${state.message}</div>` : ""}
         ${state.error ? `<div class="error">${state.error}</div>` : ""}
         ${state.loading.active ? renderTimedLoading(loadingTitle, "Loading module data.") : activeRenderer()}
-        <div class="page-footer">
-          <button class="danger" onclick="handleLogout()">Logout</button>
-        </div>
       </main>
       ${renderActionOverlay()}
       ${renderSecretPrompt()}
